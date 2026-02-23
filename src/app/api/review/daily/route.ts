@@ -98,40 +98,43 @@ function generateAlgorithmicReview(
 ): string {
   const lines: string[] = [];
 
-  lines.push(`**Score do dia**: ${score}/100`);
-  lines.push('');
-
-  if (completionRate >= 80) {
-    lines.push(`**O que funcionou**: Alta taxa de conclusao (${Math.round(completionRate)}%). Boa execucao do planejado.`);
-  } else if (completionRate >= 50) {
-    lines.push(`**O que funcionou**: Progresso razoavel com ${tasksCompleted}/${tasksTotal} tarefas concluidas.`);
+  // Diagnostic
+  if (score >= 80) {
+    lines.push(`**Diagnóstico**: Score ${score}/100. Dia sólido — mas sólido não é excepcional.`);
+  } else if (score >= 50) {
+    lines.push(`**Diagnóstico**: Score ${score}/100. Mediano. Mediano não bate meta.`);
   } else {
-    lines.push(`**O que funcionou**: Dia com menos entregas que o planejado (${tasksCompleted}/${tasksTotal}).`);
+    lines.push(`**Diagnóstico**: Score ${score}/100. Dia desperdiçado. Cada dia assim é um dia a mais de atraso.`);
   }
   lines.push('');
 
-  const improvements: string[] = [];
+  // Numbers
+  lines.push(`**Os números**: ${tasksCompleted}/${tasksTotal} tarefas (${Math.round(completionRate)}%). ${deepMinutes}min de deep work${deepMinutes < 60 ? ' — isso é quase nada' : ''}. Frog: ${frogCompleted ? 'feito' : 'NÃO FEITO'}.`);
+  lines.push('');
+
+  // What was avoided
+  const avoided: string[] = [];
   if (!frogCompleted) {
-    improvements.push('O frog do dia nao foi concluido — priorize a tarefa mais importante primeiro amanha.');
+    avoided.push('Fugiu do frog — a tarefa mais importante do dia ficou pra depois. Depois vira nunca.');
   }
   if (deepMinutes < 60) {
-    improvements.push(`Apenas ${deepMinutes}min de deep work. Tente bloquear pelo menos 2h de foco profundo.`);
+    avoided.push(`${deepMinutes}min de deep work é insuficiente. Sem blocos de foco, você está só reagindo.`);
   }
   if (completionRate < 50) {
-    improvements.push('Menos da metade das tarefas foram concluidas. Revise se esta planejando de forma realista.');
+    avoided.push(`Menos de metade executado. Ou planejou demais ou executou de menos — os dois são problemas.`);
   }
-  if (improvements.length === 0) {
-    improvements.push('Continue mantendo a consistencia.');
+  if (avoided.length > 0) {
+    lines.push(`**O que você evitou**: ${avoided[0]}`);
   }
-  lines.push(`**O que melhorar**: ${improvements.slice(0, 2).join(' ')}`);
   lines.push('');
 
+  // Tomorrow
   if (score >= 80) {
-    lines.push('**Desafio para amanha**: Mantenha o ritmo e aumente a barra — adicione uma tarefa de deep work extra.');
+    lines.push('**Amanhã**: Aumente a barra. Adicione 30min de deep work ao plano. Prove que hoje não foi exceção.');
   } else if (score >= 50) {
-    lines.push('**Desafio para amanha**: Comece pelo frog e proteja suas horas de deep work.');
+    lines.push('**Amanhã**: Primeira coisa do dia = frog. Sem email, sem mensagem, sem desculpa. 90min de foco.');
   } else {
-    lines.push('**Desafio para amanha**: Planeje menos, execute mais. Foque em 3 tarefas essenciais.');
+    lines.push('**Amanhã**: Planeje MENOS. 3 tarefas, 1 frog. Execute 100% ao invés de planejar 10 e fazer 3.');
   }
 
   return lines.join('\n');
@@ -226,17 +229,24 @@ export async function GET(request: NextRequest) {
         `Conteudo: ${dailyEntry?.content_creation ? 'Sim' : 'Nao'}`,
       ].join('\n');
 
-      const systemPrompt = `Voce e o Coach de Performance do Bernardo. Gere uma revisao do dia concisa e direta.
+      const systemPrompt = `Você é o coach de performance mais duro e honesto que existe. Você NÃO é cheerleader. Você é o amigo que fala a verdade na cara.
+
+Gere uma revisão do dia BRUTAL e baseada em dados:
 
 Formato:
-1. **Score do dia** (0-100): baseado em taxa de conclusao, horas de deep work, e alinhamento com metas
-2. **O que funcionou**: 1-2 pontos especificos
-3. **O que melhorar**: 1-2 pontos especificos
-4. **Conexao com metas**: como o dia impactou as metas de longo prazo
-5. **Desafio para amanha**: um desafio especifico baseado no que nao foi feito hoje
+1. **Diagnóstico** (1 frase cortante): O dia foi bom, medíocre ou um desperdício? Sem rodeios.
+2. **Os números não mentem**: Taxa de conclusão, deep work real vs. planejado, frog feito ou não. Coloque o espelho na cara.
+3. **O que você evitou**: Se o frog não foi feito, se tarefas importantes ficaram, nomeie a esquiva e calcule o custo. "Cada dia sem treinar é X treinos a mais por semana no resto do quarter."
+4. **Alinhamento com metas**: As tarefas do dia moveram as metas que estão atrasadas? Ou você gastou o dia em shallow work enquanto as metas morrem?
+5. **Amanhã**: UMA ação concreta, com hora e duração. Não "tente melhorar" — "Amanhã às 7h, 90min de deep work no projeto X."
 
-Seja direto, honesto, motivador. Portugues brasileiro. Maximo 200 palavras.
-Nao use emojis em excesso — maximo 3 por review.`;
+Regras:
+- Português brasileiro, direto, sem floreio
+- Máximo 200 palavras
+- Use números concretos (%, minutos, gaps)
+- NÃO diga "parabéns", "ótimo trabalho", "continue assim" a menos que o score seja genuinamente > 85
+- Se tudo está mediano, desafie: "Mediano não bate meta"`;
+
 
       try {
         const Anthropic = (await import('@anthropic-ai/sdk')).default;

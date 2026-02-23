@@ -96,49 +96,54 @@ function generateAlgorithmicWeeklyReview(
   goalVelocities: { area: string; title: string; velocity: string }[]
 ): string {
   const lines: string[] = [];
-
-  lines.push(`**Score da semana**: ${Math.round(avgScore)}/100`);
-  lines.push('');
-
   const weeklyCompletionRate = totalTasks > 0 ? Math.round((totalTasksCompleted / totalTasks) * 100) : 0;
-  lines.push(`**Padrao observado**: ${totalTasksCompleted}/${totalTasks} tarefas concluidas (${weeklyCompletionRate}%). ${totalDeepWork} minutos de deep work total na semana.`);
-  lines.push('');
-
-  const wins: string[] = [];
-  if (bestDay) wins.push(`Melhor dia: ${bestDay.date} com score ${bestDay.score}`);
-  if (streak >= 3) wins.push(`Streak de ${streak} dias consecutivos produtivos`);
-  if (totalDeepWork >= 600) wins.push(`Mais de 10h de deep work na semana`);
-  if (wins.length === 0) wins.push('Semana com oportunidade de melhoria');
-  lines.push(`**Wins**: ${wins.join('. ')}`);
-  lines.push('');
-
-  const alerts: string[] = [];
-  if (worstDay && worstDay.score < 40) alerts.push(`Dia critico: ${worstDay.date} (score ${worstDay.score})`);
-  if (avgScore < 50) alerts.push('Media semanal abaixo de 50 — revise o planejamento');
-  if (totalDeepWork < 300) alerts.push('Menos de 5h de deep work — proteja blocos de foco');
   const behindGoals = goalVelocities.filter(g => g.velocity === 'behind');
-  if (behindGoals.length > 0) alerts.push(`Metas atrasadas: ${behindGoals.map(g => g.area).join(', ')}`);
-  if (alerts.length === 0) alerts.push('Sem alertas criticos esta semana');
-  lines.push(`**Alerta**: ${alerts.join('. ')}`);
-  lines.push('');
+  const deepHours = (totalDeepWork / 60).toFixed(1);
 
-  lines.push('**Meta check**:');
-  for (const g of goalVelocities) {
-    const status = g.velocity === 'ahead' ? 'Adiantado' : g.velocity === 'on_track' ? 'No ritmo' : 'Atrasado';
-    lines.push(`- ${g.area}: ${status}`);
+  // Verdict
+  if (avgScore >= 80) {
+    lines.push(`**Veredicto**: Score ${Math.round(avgScore)}/100. Semana forte — mas uma semana não faz um quarter.`);
+  } else if (avgScore >= 50) {
+    lines.push(`**Veredicto**: Score ${Math.round(avgScore)}/100. Mediana. Se você mantiver esse ritmo, vai fechar o quarter no meio do caminho.`);
+  } else {
+    lines.push(`**Veredicto**: Score ${Math.round(avgScore)}/100. Semana perdida. Cada semana assim é irrecuperável.`);
   }
   lines.push('');
 
-  lines.push('**Plano sugerido**:');
+  // Pattern
+  lines.push(`**Padrão**: ${totalTasksCompleted}/${totalTasks} tarefas (${weeklyCompletionRate}%). ${deepHours}h de deep work.`);
+  if (totalDeepWork < 300) {
+    lines.push(`${deepHours}h de deep work em 5 dias úteis = menos de 1h/dia. Você está operando no modo reativo.`);
+  }
+  if (worstDay && bestDay && bestDay.score - worstDay.score > 40) {
+    lines.push(`Oscilação brutal: melhor dia ${bestDay.score}, pior dia ${worstDay.score}. Consistência > picos.`);
+  }
+  lines.push('');
+
+  // Goals
+  lines.push('**Metas**:');
+  for (const g of goalVelocities) {
+    if (g.velocity === 'behind') {
+      lines.push(`- ${g.area}: ATRASADO. Se não acelerar essa semana, a conta vai ficar impagável.`);
+    } else if (g.velocity === 'on_track') {
+      lines.push(`- ${g.area}: No ritmo. Mas "no ritmo" = baseline, não excelência.`);
+    } else {
+      lines.push(`- ${g.area}: Adiantado. Bom — não relaxe.`);
+    }
+  }
+  lines.push('');
+
+  // Actions
+  lines.push('**Ações para essa semana**:');
   if (avgScore < 60) {
-    lines.push('1. Reduza o numero de tarefas diarias para focar na execucao');
-    lines.push('2. Comece cada dia pelo frog antes de qualquer coisa');
+    lines.push('1. Reduza para 3 tarefas/dia. Execute 100% ao invés de planejar 8 e fazer 3.');
+    lines.push('2. Frog primeiro — 7h, sem negociação.');
   } else {
-    lines.push('1. Mantenha a consistencia e aumente gradualmente a carga de deep work');
-    lines.push('2. Reserve tempo para revisar o progresso das metas no meio da semana');
+    lines.push('1. Proteja 2h de deep work/dia. Bloqueie na agenda como reunião.');
+    lines.push(`2. ${streak >= 3 ? `Streak de ${streak} dias — não quebre.` : 'Construa um streak: 3 dias seguidos com score > 60.'}`);
   }
   if (behindGoals.length > 0) {
-    lines.push(`3. Priorize acoes para as metas atrasadas: ${behindGoals.map(g => g.area).join(', ')}`);
+    lines.push(`3. Metas em risco (${behindGoals.map(g => g.area).join(', ')}): reserve tempo ESPECÍFICO essa semana.`);
   }
 
   return lines.join('\n');
@@ -245,18 +250,24 @@ export async function GET(request: NextRequest) {
         ...goalLines,
       ].join('\n');
 
-      const systemPrompt = `Voce e o Coach de Performance do Bernardo. Gere uma revisao semanal profunda e actionable.
+      const systemPrompt = `Você é o coach de performance mais duro e honesto que existe. Você NÃO é cheerleader. Você analisa padrões semanais e confronta com a realidade.
+
+Gere uma revisão semanal BRUTAL:
 
 Formato:
-1. **Score da semana** (0-100)
-2. **Padrao observado**: O que os dados revelam sobre o comportamento da semana
-3. **Wins**: 2-3 conquistas concretas
-4. **Alerta**: O que precisa mudar na proxima semana
-5. **Meta check**: Progresso nas 4 areas (Saude, Familia, Espiritual, Criativo) — esta no ritmo?
-6. **Plano sugerido**: 2-3 acoes especificas para proxima semana
+1. **Veredicto** (1 frase): A semana foi produtiva, medíocre ou desperdiçada? Sem suavizar.
+2. **Padrão identificado**: O que os DADOS revelam? Se a pessoa planeja muito e executa pouco, diga. Se evita deep work, diga. Se sempre pula o frog, é um padrão — nomeie.
+3. **Gap analysis das metas**: Para CADA meta (Saúde, Família, Espiritual, Criativo), compare o progresso real vs. onde deveria estar. Use a fórmula: (actual/target) vs. (% do quarter já passado). Se está atrás, calcule quantos por semana precisa para recuperar. Sem "tenta melhorar" — dê o número.
+4. **O custo da mediocridade**: Se a semana foi mediana, calcule: "Se mantiver esse ritmo, vai fechar o quarter em X% da meta Y. Isso é suficiente?"
+5. **3 ações concretas**: Cada ação com dia, hora e duração. Não "priorize deep work" — "Segunda 7h-9h, deep work no projeto Z. Quarta e sexta: treino antes das 8h."
 
-Seja analitico, use os dados. Portugues brasileiro. Maximo 400 palavras.
-Tom: mentor experiente, nao robo motivacional.`;
+Regras:
+- Português brasileiro, direto, sem floreio
+- Máximo 400 palavras
+- Use números (%, minutos, gaps, projeções)
+- NÃO diga "parabéns", "ótimo trabalho" a menos que a semana seja genuinamente excepcional (score > 85)
+- Confronte padrões de autoengano: "Você diz que quer X mas faz Y toda semana"
+- Termine com uma pergunta incômoda que force reflexão real`;
 
       try {
         const Anthropic = (await import('@anthropic-ai/sdk')).default;
