@@ -147,7 +147,13 @@ export default function DailyEntryPage() {
   const router = useRouter();
   const today = getTodayISO();
 
-  const [step, setStep] = useState(1);
+  const [step, setStep] = useState(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem(`daily-entry-step-${today}`);
+      if (saved) return parseInt(saved, 10) || 1;
+    }
+    return 1;
+  });
   const [goals, setGoals] = useState<Goal[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [overcommitment, setOvercommitment] = useState<OvercommitmentData | null>(null);
@@ -156,20 +162,43 @@ export default function DailyEntryPage() {
   const [coachLoading, setCoachLoading] = useState(false);
   const [coachResponse, setCoachResponse] = useState<string | null>(null);
 
-  const [wizard, setWizard] = useState<WizardState>({
-    energy: 0,
-    focusWord: "",
-    training: false,
-    spiritual: false,
-    family: false,
-    content: false,
-    contentDescription: "",
-    frogTitle: "",
-    frogProjectId: null,
-    frogMinutes: 90,
-    deepTasks: [],
-    shallowTasks: [],
+  const STORAGE_KEY = `daily-entry-${today}`;
+
+  const [wizard, setWizard] = useState<WizardState>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        try {
+          return JSON.parse(saved);
+        } catch {
+          // ignore
+        }
+      }
+    }
+    return {
+      energy: 0,
+      focusWord: "",
+      training: false,
+      spiritual: false,
+      family: false,
+      content: false,
+      contentDescription: "",
+      frogTitle: "",
+      frogProjectId: null,
+      frogMinutes: 90,
+      deepTasks: [],
+      shallowTasks: [],
+    };
   });
+
+  // Persist wizard state and step to localStorage
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(wizard));
+  }, [wizard, STORAGE_KEY]);
+
+  useEffect(() => {
+    localStorage.setItem(`daily-entry-step-${today}`, String(step));
+  }, [step, today]);
 
   // Quick-add inputs (not part of wizard state)
   const [deepInput, setDeepInput] = useState("");
@@ -466,6 +495,10 @@ export default function DailyEntryPage() {
       } catch {
         // daily-entry API may not exist yet, that's fine
       }
+
+      // Clear saved state after successful save
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(`daily-entry-step-${today}`);
 
       router.push("/");
     } catch {
