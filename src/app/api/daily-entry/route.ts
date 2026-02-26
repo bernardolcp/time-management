@@ -40,10 +40,10 @@ export async function POST(request: NextRequest) {
     date,
     energy_level: energy_level ?? 3,
     focus_word: focus_word ?? '',
-    training: training ?? 0,
-    spiritual: spiritual ?? 0,
-    family_day: family_day ?? 0,
-    content_creation: content_creation ?? 0,
+    training: training ? 1 : 0,
+    spiritual: spiritual ? 1 : 0,
+    family_day: family_day ? 1 : 0,
+    content_creation: content_creation ? 1 : 0,
   });
 
   const entry = db.prepare('SELECT * FROM daily_entries WHERE date = ?').get(date);

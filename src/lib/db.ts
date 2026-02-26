@@ -3,21 +3,21 @@ import path from 'path';
 
 const DB_PATH = path.join(process.cwd(), 'data', 'productivity.db');
 
-let db: Database.Database;
+const globalForDb = globalThis as unknown as { __productivityDb: Database.Database };
 
 export function getDb(): Database.Database {
-  if (!db) {
+  if (!globalForDb.__productivityDb) {
     const fs = require('fs');
     const dir = path.dirname(DB_PATH);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-    db = new Database(DB_PATH);
-    db.pragma('journal_mode = WAL');
-    db.pragma('foreign_keys = ON');
-    initDb(db);
+    globalForDb.__productivityDb = new Database(DB_PATH);
+    globalForDb.__productivityDb.pragma('journal_mode = WAL');
+    globalForDb.__productivityDb.pragma('foreign_keys = ON');
+    initDb(globalForDb.__productivityDb);
   }
-  return db;
+  return globalForDb.__productivityDb;
 }
 
 function initDb(db: Database.Database) {
