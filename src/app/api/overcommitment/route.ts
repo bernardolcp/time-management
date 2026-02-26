@@ -7,6 +7,12 @@ const COMMUTE_BUFFER = 30;       // 15min ida + 15min volta universidade
 const REACTIVE_BUFFER = 45;      // Buffer para responder msgs, imprevistos
 const TRANSITION_PER_EVENT = 5;  // 5min de transição entre cada evento
 
+// Convert "HH:MM" to minutes since midnight
+function parseHHMM(hhmm: string): number {
+  const [h, m] = hhmm.split(':').map(Number);
+  return (h || 0) * 60 + (m || 0);
+}
+
 export async function GET(request: NextRequest) {
   try {
     const db = getDb();
@@ -22,7 +28,13 @@ export async function GET(request: NextRequest) {
       return row?.value ?? fallback;
     };
 
-    const availableHoursMinutes = parseFloat(getSetting('available_hours', '8')) * 60;
+    // If available_hours is blank/invalid, derive from work_start/work_end
+    const workStartStr = getSetting('work_start', '08:00');
+    const workEndStr = getSetting('work_end', '18:00');
+    const availableRaw = parseFloat(getSetting('available_hours', ''));
+    const availableHoursMinutes = isNaN(availableRaw) || availableRaw <= 0
+      ? (parseHHMM(workEndStr) - parseHHMM(workStartStr))
+      : availableRaw * 60;
     const lunchBreak = parseInt(getSetting('lunch_break', String(LUNCH_BREAK)));
     const commuteBuffer = parseInt(getSetting('commute_buffer', String(COMMUTE_BUFFER)));
     const reactiveBuffer = parseInt(getSetting('reactive_buffer', String(REACTIVE_BUFFER)));
@@ -32,11 +44,24 @@ export async function GET(request: NextRequest) {
       'SELECT start_time, end_time, title FROM calendar_events WHERE date = ? AND all_day = 0'
     ).all(date) as { start_time: string; end_time: string; title: string }[];
 
+    // Merge overlapping events before summing time
+    const intervals = events
+      .map(e => ({ start: new Date(e.start_time).getTime(), end: new Date(e.end_time).getTime() }))
+      .sort((a, b) => a.start - b.start);
+
+    const merged: { start: number; end: number }[] = [];
+    for (const iv of intervals) {
+      const last = merged[merged.length - 1];
+      if (last && iv.start < last.end) {
+        last.end = Math.max(last.end, iv.end);
+      } else {
+        merged.push({ ...iv });
+      }
+    }
+
     let calendarMinutes = 0;
-    for (const event of events) {
-      const start = new Date(event.start_time).getTime();
-      const end = new Date(event.end_time).getTime();
-      calendarMinutes += (end - start) / 60000;
+    for (const m of merged) {
+      calendarMinutes += (m.end - m.start) / 60000;
     }
 
     // 3. Smart buffer: check if lunch is already in calendar

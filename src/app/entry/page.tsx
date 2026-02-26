@@ -484,23 +484,21 @@ export default function DailyEntryPage() {
       }
 
       // Save daily entry
-      try {
-        await fetch("/api/daily-entry", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            date: today,
-            energy_level: wizard.energy,
-            focus_word: wizard.focusWord,
-            training: wizard.training,
-            spiritual: wizard.spiritual,
-            family: wizard.family,
-            content: wizard.content,
-            content_description: wizard.contentDescription,
-          }),
-        });
-      } catch {
-        // daily-entry API may not exist yet, that's fine
+      const entryRes = await fetch("/api/daily-entry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          date: today,
+          energy_level: wizard.energy,
+          focus_word: wizard.focusWord,
+          training: wizard.training ? 1 : 0,
+          spiritual: wizard.spiritual ? 1 : 0,
+          family_day: wizard.family ? 1 : 0,
+          content_creation: wizard.content ? 1 : 0,
+        }),
+      });
+      if (!entryRes.ok) {
+        console.error("Failed to save daily entry:", await entryRes.text());
       }
 
       // Clear saved state after successful save
