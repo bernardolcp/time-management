@@ -116,33 +116,38 @@ function calculateDailyScore(
   return Math.round(completionScore + deepWorkScore + frogScore + habitsScore);
 }
 
+function formatLocalDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 function getWeekBounds(dateStr: string): { weekStart: string; weekEnd: string } {
   const d = new Date(dateStr + 'T00:00:00');
   const day = d.getDay(); // 0=Sun, 1=Mon
   const mondayOffset = day === 0 ? -6 : 1 - day;
   const monday = new Date(d);
   monday.setDate(d.getDate() + mondayOffset);
-  const friday = new Date(monday);
-  friday.setDate(monday.getDate() + 4);
   const sunday = new Date(monday);
   sunday.setDate(monday.getDate() + 6);
 
   return {
-    weekStart: monday.toISOString().split('T')[0],
-    weekEnd: sunday.toISOString().split('T')[0],
+    weekStart: formatLocalDate(monday),
+    weekEnd: formatLocalDate(sunday),
   };
 }
 
 function getPrevWeekBounds(dateStr: string): { weekStart: string; weekEnd: string } {
   const d = new Date(dateStr + 'T00:00:00');
   d.setDate(d.getDate() - 7);
-  return getWeekBounds(d.toISOString().split('T')[0]);
+  return getWeekBounds(formatLocalDate(d));
 }
 
 function addDays(dateStr: string, days: number): string {
   const d = new Date(dateStr + 'T00:00:00');
   d.setDate(d.getDate() + days);
-  return d.toISOString().split('T')[0];
+  return formatLocalDate(d);
 }
 
 // --- Main handler ---

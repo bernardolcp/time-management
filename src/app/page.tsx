@@ -6,9 +6,10 @@ import Link from "next/link";
 // --- Types ---
 
 interface OvercommitmentData {
-  status: "green" | "yellow" | "red";
+  status: "green" | "yellow" | "red" | "done";
   available_minutes: number;
   committed_minutes: number;
+  completed_minutes?: number;
   remaining_minutes: number;
   deep_blocks: number;
 }
@@ -97,7 +98,10 @@ function formatMinutes(n: number): string {
 
 function getTodayISO(): string {
   const d = new Date();
-  return d.toISOString().split("T")[0];
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 function formatDateHeading(): string {
@@ -115,19 +119,6 @@ const energyEmojis: Record<number, string> = {
   4: "\u{1F60A}", // happy
   5: "\u{26A1}",  // high energy
 };
-
-const AREA_CONFIG: Record<string, { emoji: string; color: string; bgColor: string; barColor: string }> = {
-  "Saude": { emoji: "\u{1F4AA}", color: "text-emerald-700", bgColor: "bg-emerald-50", barColor: "bg-emerald-500" },
-  "Saúde": { emoji: "\u{1F4AA}", color: "text-emerald-700", bgColor: "bg-emerald-50", barColor: "bg-emerald-500" },
-  "Familia": { emoji: "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}", color: "text-rose-700", bgColor: "bg-rose-50", barColor: "bg-rose-500" },
-  "Família": { emoji: "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}", color: "text-rose-700", bgColor: "bg-rose-50", barColor: "bg-rose-500" },
-  "Espiritual": { emoji: "\u{1F64F}", color: "text-violet-700", bgColor: "bg-violet-50", barColor: "bg-violet-500" },
-  "Criativo": { emoji: "\u{1F3A8}", color: "text-amber-700", bgColor: "bg-amber-50", barColor: "bg-amber-500" },
-};
-
-function getAreaConfig(area: string) {
-  return AREA_CONFIG[area] ?? { emoji: "\u{1F3AF}", color: "text-zinc-700", bgColor: "bg-zinc-50", barColor: "bg-zinc-500" };
-}
 
 // --- Component ---
 
@@ -204,6 +195,16 @@ export default function Dashboard() {
         prev.map((t) => (t.id === task.id ? { ...t, completed: newCompleted } : t))
       );
       fetchOvercommitment();
+      fetchScores();
+    }
+  }
+
+  async function deleteTask(taskId: number) {
+    const res = await fetch(`/api/tasks/${taskId}`, { method: "DELETE" });
+    if (res.ok) {
+      setTasks((prev) => prev.filter((t) => t.id !== taskId));
+      fetchOvercommitment();
+      fetchScores();
     }
   }
 
@@ -324,6 +325,19 @@ export default function Dashboard() {
       message: (r: number) =>
         `Overcommitted by ${formatMinutes(Math.abs(r))}! Move or cut tasks.`,
     },
+    done: {
+      bg: "bg-zinc-50",
+      border: "border-zinc-400",
+      text: "text-zinc-700",
+      icon: "text-zinc-500",
+      message: () => {
+        const completed = overcommitment?.completed_minutes ?? 0;
+        const total = overcommitment?.committed_minutes ?? 0;
+        return total > 0
+          ? `Day complete. ${formatMinutes(completed)} of ${formatMinutes(total)} delivered.`
+          : `Day complete.`;
+      },
+    },
   };
 
   // --- Render ---
@@ -432,45 +446,6 @@ export default function Dashboard() {
                 {overcommitment.deep_blocks}
               </p>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* Goal Progress Cards */}
-      {goals.length > 0 && (
-        <div>
-          <h2 className="text-lg font-semibold text-zinc-900 mb-3">Goal Progress (Q1)</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {goals.slice(0, 4).map((goal) => {
-              const config = getAreaConfig(goal.area);
-              const target = goal.q1_target || 0;
-              const actual = goal.q1_actual || 0;
-              const pct = target > 0 ? Math.min(Math.round((actual / target) * 100), 100) : 0;
-
-              return (
-                <div
-                  key={goal.id}
-                  className={`rounded-lg border border-zinc-200 bg-white p-4 ${config.bgColor} bg-opacity-30`}
-                >
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="text-xl">{config.emoji}</span>
-                    <h3 className={`text-sm font-semibold ${config.color}`}>{goal.title}</h3>
-                  </div>
-                  <div className="w-full bg-zinc-200 rounded-full h-2 mb-2">
-                    <div
-                      className={`${config.barColor} h-2 rounded-full transition-all`}
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className={`font-semibold ${config.color}`}>{pct}%</span>
-                    <span className="text-zinc-500">
-                      {actual}/{target} {goal.unit}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
           </div>
         </div>
       )}
@@ -624,54 +599,6 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Goal Velocity Bars */}
-          {scores.goal_velocity.length > 0 && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {scores.goal_velocity.map((gv) => {
-                const config = getAreaConfig(gv.area);
-                const velocityColors = {
-                  critical: { bg: "bg-red-100", bar: "bg-red-500", text: "text-red-700", label: "Critico" },
-                  behind: { bg: "bg-amber-100", bar: "bg-amber-500", text: "text-amber-700", label: "Atras" },
-                  on_track: { bg: "bg-emerald-100", bar: "bg-emerald-500", text: "text-emerald-700", label: "No ritmo" },
-                  ahead: { bg: "bg-blue-100", bar: "bg-blue-500", text: "text-blue-700", label: "Adiantado" },
-                };
-                const vc = velocityColors[gv.status];
-                const barWidth = Math.min(gv.velocity * 100, 150);
-
-                return (
-                  <div
-                    key={gv.goal_id}
-                    className="rounded-lg border border-zinc-200 bg-white px-3 py-2.5 flex items-center gap-3"
-                  >
-                    <span className="text-base flex-shrink-0">{config.emoji}</span>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs font-medium text-zinc-700 truncate">{gv.area}</span>
-                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${vc.bg} ${vc.text}`}>
-                          {vc.label}
-                        </span>
-                      </div>
-                      <div className="w-full bg-zinc-100 rounded-full h-1.5">
-                        <div
-                          className={`${vc.bar} h-1.5 rounded-full transition-all duration-500`}
-                          style={{ width: `${Math.min(barWidth, 100)}%` }}
-                        />
-                      </div>
-                      <div className="flex items-center justify-between mt-0.5">
-                        <span className="text-[10px] text-zinc-400 font-mono">
-                          {gv.actual}/{gv.target}
-                        </span>
-                        <span className="text-[10px] text-zinc-400 font-mono">
-                          {gv.velocity}x
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
           {/* Achievements Row */}
           <div className="flex gap-2.5 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-hide">
             {scores.achievements.map((ach) => {
@@ -787,6 +714,17 @@ export default function Dashboard() {
                 >
                   {task.type}
                 </span>
+
+                {/* Delete */}
+                <button
+                  onClick={() => deleteTask(task.id)}
+                  className="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded-full text-zinc-300 hover:text-red-500 hover:bg-red-50 transition-colors"
+                  title="Delete task"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
               </li>
             ))}
           </ul>

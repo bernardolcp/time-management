@@ -144,6 +144,7 @@ export async function GET(request: NextRequest) {
   try {
     const db = getDb();
     const date = request.nextUrl.searchParams.get('date');
+    const generate = request.nextUrl.searchParams.get('generate') === 'true';
 
     if (!date) {
       return NextResponse.json({ error: 'date query param is required' }, { status: 400 });
@@ -151,7 +152,7 @@ export async function GET(request: NextRequest) {
 
     // Check if review already exists
     const existing = db.prepare('SELECT * FROM daily_reviews WHERE date = ?').get(date) as Record<string, unknown> | undefined;
-    if (existing) {
+    if (existing && !generate) {
       return NextResponse.json({
         score: existing.score,
         review_text: existing.review_text,
@@ -162,6 +163,11 @@ export async function GET(request: NextRequest) {
           completion_rate: existing.completion_rate,
         },
       });
+    }
+
+    // If not generating, just return empty (no auto-creation)
+    if (!generate) {
+      return NextResponse.json({ empty: true });
     }
 
     // Fetch data

@@ -11,7 +11,10 @@ function getMonday(d: Date): Date {
 }
 
 function formatDate(d: Date): string {
-  return d.toISOString().split("T")[0];
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 function formatWeekLabel(d: Date): string {
@@ -155,7 +158,7 @@ export default function ReviewPage() {
   const weekKey = formatDate(weekStart);
   const weekDates = Array.from({ length: 7 }, (_, i) => formatDate(addDays(weekStart, i)));
 
-  // Fetch existing daily reviews for the week
+  // Fetch existing daily reviews for the week (read-only, no auto-generation)
   useEffect(() => {
     const fetchDailyReviews = async () => {
       const reviews: Record<string, DailyReview> = {};
@@ -164,7 +167,7 @@ export default function ReviewPage() {
           const res = await fetch(`/api/review/daily?date=${date}`);
           if (res.ok) {
             const data = await res.json();
-            if (data.score !== undefined && !data.error) {
+            if (data.score !== undefined && !data.error && !data.empty) {
               reviews[date] = data;
             }
           }
@@ -219,10 +222,10 @@ export default function ReviewPage() {
   const generateDailyReview = async (date: string) => {
     setLoadingDaily(date);
     try {
-      const res = await fetch(`/api/review/daily?date=${date}`);
+      const res = await fetch(`/api/review/daily?date=${date}&generate=true`);
       if (res.ok) {
         const data = await res.json();
-        if (!data.error) {
+        if (!data.error && !data.empty) {
           setDailyReviews((prev) => ({ ...prev, [date]: data }));
         }
       }
@@ -330,6 +333,16 @@ export default function ReviewPage() {
                         <div className="text-[10px] text-zinc-400">
                           {review.stats.deep_work_minutes}min
                         </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            generateDailyReview(date);
+                          }}
+                          disabled={isLoading}
+                          className="mt-1 text-[9px] px-1.5 py-0.5 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 transition-colors disabled:opacity-50"
+                        >
+                          {isLoading ? "..." : "↻"}
+                        </button>
                       </>
                     ) : (
                       <div className="py-2">

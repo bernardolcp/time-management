@@ -22,6 +22,16 @@ interface Goal {
   sort_order: number;
 }
 
+interface GoalVelocity {
+  goal_id: number;
+  area: string;
+  title: string;
+  velocity: number;
+  status: "ahead" | "on_track" | "behind" | "critical";
+  target: number;
+  actual: number;
+}
+
 interface BehaviorLog {
   date: string;
   done: number;
@@ -59,7 +69,10 @@ function getMonday(d: Date): Date {
 }
 
 function formatDate(d: Date): string {
-  return d.toISOString().split("T")[0];
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 function getWeekDates(monday: Date): Date[] {
@@ -93,6 +106,30 @@ const AREA_COLORS: Record<string, string> = {
   Relationships: "bg-purple-100 text-purple-700",
 };
 
+const AREA_EMOJI: Record<string, string> = {
+  "Saude": "\u{1F4AA}",
+  "Saúde": "\u{1F4AA}",
+  "Familia": "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}",
+  "Família": "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}",
+  "Espiritual": "\u{1F64F}",
+  "Criativo": "\u{1F3A8}",
+};
+
+const VELOCITY_COLORS = {
+  critical: { bg: "bg-red-100", bar: "bg-red-500", text: "text-red-700", label: "Critico" },
+  behind: { bg: "bg-amber-100", bar: "bg-amber-500", text: "text-amber-700", label: "Atras" },
+  on_track: { bg: "bg-emerald-100", bar: "bg-emerald-500", text: "text-emerald-700", label: "No ritmo" },
+  ahead: { bg: "bg-blue-100", bar: "bg-blue-500", text: "text-blue-700", label: "Adiantado" },
+};
+
+function getTodayISO(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 function progressColor(pct: number): string {
   if (pct >= 80) return "bg-emerald-500";
   if (pct >= 50) return "bg-amber-500";
@@ -106,6 +143,7 @@ function progressColor(pct: number): string {
 export default function GoalsPage() {
   const [goals, setGoals] = useState<Goal[]>([]);
   const [behaviors, setBehaviors] = useState<Behavior[]>([]);
+  const [goalVelocity, setGoalVelocity] = useState<GoalVelocity[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Add Goal form state
@@ -146,8 +184,18 @@ export default function GoalsPage() {
     if (res.ok) setBehaviors(await res.json());
   }, [monday]);
 
+  const fetchVelocity = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/scores?date=${getTodayISO()}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.goal_velocity) setGoalVelocity(data.goal_velocity);
+      }
+    } catch { /* non-critical */ }
+  }, []);
+
   useEffect(() => {
-    Promise.all([fetchGoals(), fetchBehaviors()]).finally(() =>
+    Promise.all([fetchGoals(), fetchBehaviors(), fetchVelocity()]).finally(() =>
       setLoading(false)
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -313,6 +361,48 @@ export default function GoalsPage() {
             {showGoalForm ? "Cancel" : "Add Goal"}
           </button>
         </div>
+
+        {/* Goal Velocity Cards */}
+        {goalVelocity.length > 0 && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
+            {goalVelocity.map((gv) => {
+              const emoji = AREA_EMOJI[gv.area] ?? "\u{1F3AF}";
+              const vc = VELOCITY_COLORS[gv.status];
+              const barWidth = Math.min(gv.velocity * 100, 150);
+
+              return (
+                <div
+                  key={gv.goal_id}
+                  className="rounded-lg border border-zinc-200 bg-white px-3 py-2.5 flex items-center gap-3"
+                >
+                  <span className="text-base flex-shrink-0">{emoji}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-medium text-zinc-700 truncate">{gv.area}</span>
+                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${vc.bg} ${vc.text}`}>
+                        {vc.label}
+                      </span>
+                    </div>
+                    <div className="w-full bg-zinc-100 rounded-full h-1.5">
+                      <div
+                        className={`${vc.bar} h-1.5 rounded-full transition-all duration-500`}
+                        style={{ width: `${Math.min(barWidth, 100)}%` }}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between mt-0.5">
+                      <span className="text-[10px] text-zinc-400 font-mono">
+                        {gv.actual}/{gv.target}
+                      </span>
+                      <span className="text-[10px] text-zinc-400 font-mono">
+                        {gv.velocity}x
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {/* Add Goal Form */}
         {showGoalForm && (

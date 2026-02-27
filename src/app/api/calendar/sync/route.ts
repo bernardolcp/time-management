@@ -30,7 +30,10 @@ export async function POST(request: NextRequest) {
     const accessToken = (session as any).accessToken as string;
 
     const dateParam = request.nextUrl.searchParams.get("date");
-    const date = dateParam || new Date().toISOString().split("T")[0];
+    const date = dateParam || (() => {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    })();
 
     const oauth2Client = new google.auth.OAuth2();
     oauth2Client.setCredentials({ access_token: accessToken });
