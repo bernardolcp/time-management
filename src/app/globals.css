@@ -1,13 +1,68 @@
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Crimson+Text:ital,wght@0,400;0,600;0,700;1,400;1,600&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Caveat:wght@400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --background: #fafafa;
-  --foreground: #171717;
+  --bg: #faf9f5;
+  --surface: #f5f0e8;
+  --border: #e8e6dc;
+  --muted: #b0aea5;
+  --text: #141413;
+  --accent: #d97757;
+  --accent-light: #f0d8cc;
+  --olive: #788c5d;
+  --olive-light: #dce4d3;
+  --blue: #6a9bcc;
+  --blue-light: #d4e3f0;
+  --journal: #5a5856;
 }
 
 body {
-  color: var(--foreground);
-  background: var(--background);
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Crimson Text', serif;
+  font-size: 17px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Underline inputs — editorial style */
+input[type="text"]:focus,
+textarea:focus {
+  outline: none;
+}
+
+::selection {
+  background: var(--accent-light);
+  color: var(--text);
+}
+
+/* Ruled notebook lines for journal areas */
+.ruled-bg {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent,
+    transparent 31px,
+    var(--border) 31px,
+    var(--border) 32px
+  );
+  background-position: 0 8px;
+}
+
+/* Subtle scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
 }

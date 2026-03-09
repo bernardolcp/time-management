@@ -145,8 +145,8 @@ export default function PlanPage() {
 
   // Summary
   const totalMinutes = tasks.reduce((s, t) => s + t.estimated_minutes, 0);
-  const deepMinutes = tasks.filter((t) => t.type === "deep").reduce((s, t) => s + t.estimated_minutes, 0);
-  const shallowMinutes = tasks.filter((t) => t.type === "shallow").reduce((s, t) => s + t.estimated_minutes, 0);
+  const deepMinutesTotal = tasks.filter((t) => t.type === "deep").reduce((s, t) => s + t.estimated_minutes, 0);
+  const shallowMinutesTotal = tasks.filter((t) => t.type === "shallow").reduce((s, t) => s + t.estimated_minutes, 0);
   const completedCount = tasks.filter((t) => t.completed).length;
 
   // Overcommitment bar
@@ -154,54 +154,87 @@ export default function PlanPage() {
     ? Math.min((overcommitment.committed_minutes / Math.max(overcommitment.available_minutes, 1)) * 100, 100)
     : 0;
 
-  const statusColors: Record<string, string> = {
-    green: "bg-emerald-500",
-    yellow: "bg-amber-500",
-    red: "bg-red-500",
-  };
-
-  function goalTitle(goalId: number | null): string | null {
-    if (!goalId) return null;
-    return goals.find((g) => g.id === goalId)?.title ?? null;
+  function goalTitle(gId: number | null): string | null {
+    if (!gId) return null;
+    return goals.find((g) => g.id === gId)?.title ?? null;
   }
+
+  // Format date for header
+  const dateObj = new Date(date + "T12:00:00");
+  const dayName = dateObj.toLocaleDateString("en-US", { weekday: "long" });
+  const monthName = dateObj.toLocaleDateString("en-US", { month: "long" });
+  const dayNum = dateObj.getDate();
 
   function TaskRow({ task }: { task: Task }) {
     const linked = goalTitle(task.goal_id);
     return (
       <div
-        className={`flex items-center gap-3 py-2 px-3 rounded-md group hover:bg-zinc-50 transition-colors ${
-          task.completed ? "opacity-50" : ""
+        className={`flex items-center gap-3 py-3 border-b border-tempo-border group transition-opacity ${
+          task.completed ? "opacity-40" : ""
         }`}
       >
-        <input
-          type="checkbox"
-          checked={!!task.completed}
-          onChange={() => toggleCompleted(task)}
-          className="w-4 h-4 rounded border-zinc-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
-        />
-        <span className={`flex-1 text-sm ${task.completed ? "line-through text-zinc-400" : "text-zinc-900"}`}>
+        {/* Checkbox */}
+        <button
+          onClick={() => toggleCompleted(task)}
+          className="flex-shrink-0 flex items-center justify-center border border-tempo-border hover:border-tempo-text transition-colors"
+          style={{ width: "18px", height: "18px" }}
+        >
+          {!!task.completed && (
+            <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+              <path d="M1 4L3.5 6.5L9 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          )}
+        </button>
+
+        {/* Frog indicator */}
+        {!!task.is_frog && (
+          <span
+            className="flex-shrink-0 bg-tempo-accent"
+            style={{ width: "3px", height: "24px", borderRadius: "1px" }}
+          />
+        )}
+
+        {/* Title */}
+        <span className={`flex-1 font-body text-[15px] ${task.completed ? "line-through text-tempo-muted" : "text-tempo-text"}`}>
           {task.title}
         </span>
-        <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-zinc-100 text-zinc-600">
+
+        {/* Tags */}
+        <span className="font-ui text-tempo-muted" style={{ fontSize: "12px" }}>
           {formatMinutes(task.estimated_minutes)}
         </span>
         {linked && (
-          <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">
+          <span
+            className="font-ui bg-tempo-surface text-tempo-text px-2 py-0.5"
+            style={{ fontSize: "9px", textTransform: "uppercase", letterSpacing: "0.08em" }}
+          >
             {linked}
           </span>
         )}
         {!!task.urgent && (
-          <span className="text-xs font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-700">U</span>
+          <span
+            className="font-ui bg-tempo-accent text-white px-1.5 py-0.5"
+            style={{ fontSize: "9px", textTransform: "uppercase", letterSpacing: "0.08em" }}
+          >
+            U
+          </span>
         )}
         {!!task.important && (
-          <span className="text-xs font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">I</span>
+          <span
+            className="font-ui bg-tempo-surface text-tempo-text px-1.5 py-0.5 border border-tempo-border"
+            style={{ fontSize: "9px", textTransform: "uppercase", letterSpacing: "0.08em" }}
+          >
+            I
+          </span>
         )}
+
+        {/* Delete */}
         <button
           onClick={() => deleteTask(task.id)}
-          className="text-zinc-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
+          className="text-tempo-border hover:text-tempo-accent transition-colors opacity-0 group-hover:opacity-100"
           title="Delete task"
         >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
           </svg>
         </button>
@@ -209,13 +242,18 @@ export default function PlanPage() {
     );
   }
 
-  function TaskGroup({ label, tasks }: { label: string; tasks: Task[] }) {
-    if (tasks.length === 0) return null;
+  function TaskGroup({ label, tasks: groupTasks }: { label: string; tasks: Task[] }) {
+    if (groupTasks.length === 0) return null;
     return (
-      <div className="mb-6">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2 px-3">{label}</h3>
-        <div className="space-y-1">
-          {tasks.map((t) => (
+      <div className="mb-8">
+        <h3
+          className="font-ui font-medium text-tempo-muted mb-3"
+          style={{ fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.12em" }}
+        >
+          {label}
+        </h3>
+        <div>
+          {groupTasks.map((t) => (
             <TaskRow key={t.id} task={t} />
           ))}
         </div>
@@ -224,70 +262,99 @@ export default function PlanPage() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto">
+    <div style={{ maxWidth: "640px" }}>
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-zinc-900">Daily Plan</h1>
+      <div className="flex items-end justify-between mb-8">
+        <div>
+          <p className="font-accent text-tempo-muted" style={{ fontSize: "18px" }}>
+            {dayName}, {monthName} {dayNum}
+          </p>
+          <h1 className="font-display text-tempo-text" style={{ fontSize: "36px", lineHeight: "1.1" }}>
+            Daily Plan
+          </h1>
+        </div>
         <input
           type="date"
           value={date}
           onChange={(e) => setDate(e.target.value)}
-          className="border border-zinc-200 rounded-lg px-3 py-1.5 text-sm text-zinc-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          className="font-ui text-sm text-tempo-muted bg-transparent border border-tempo-border px-3 py-1.5 focus:border-tempo-accent focus:outline-none transition-colors"
         />
       </div>
 
       {/* Overcommitment Bar */}
       {overcommitment && (
-        <div className="sticky top-0 z-10 bg-white/80 backdrop-blur-sm border border-zinc-200 rounded-lg p-4 mb-6">
-          <div className="flex items-center justify-between text-sm mb-2">
-            <span className="font-medium text-zinc-700">
+        <div className="border border-tempo-border p-5 mb-8">
+          <div className="flex items-center justify-between mb-3">
+            <span className="font-ui text-tempo-text" style={{ fontSize: "13px", fontWeight: 500 }}>
               {formatMinutes(overcommitment.committed_minutes)} / {formatMinutes(overcommitment.available_minutes)}
             </span>
-            <span className="text-zinc-500">
-              {overcommitment.remaining_minutes >= 0 ? formatMinutes(overcommitment.remaining_minutes) + " remaining" : formatMinutes(overcommitment.remaining_minutes) + " over"}
+            <span className="font-ui text-tempo-muted" style={{ fontSize: "13px" }}>
+              {overcommitment.remaining_minutes >= 0
+                ? formatMinutes(overcommitment.remaining_minutes) + " remaining"
+                : formatMinutes(overcommitment.remaining_minutes) + " over"}
             </span>
           </div>
-          <div className="w-full h-3 bg-zinc-100 rounded-full overflow-hidden">
+          {/* Bar */}
+          <div className="relative w-full bg-tempo-surface" style={{ height: "6px" }}>
             <div
-              className={`h-full rounded-full transition-all duration-300 ${statusColors[overcommitment.status]}`}
+              className="absolute top-0 left-0 h-full bg-tempo-text transition-all duration-300"
               style={{ width: `${barPercent}%` }}
             />
+            {/* Threshold marker at 100% */}
+            <div
+              className="absolute top-[-6px] bg-tempo-muted"
+              style={{ width: "1.5px", height: "18px", left: "100%" }}
+            />
           </div>
-          <div className="mt-2 text-xs text-zinc-400">
+          <div className="flex justify-between mt-2">
+            <span className="font-ui text-[11px] text-tempo-muted">
+              {formatMinutes(overcommitment.committed_minutes)} committed
+            </span>
+            <span className="font-ui text-[11px] text-tempo-muted">
+              {formatMinutes(overcommitment.available_minutes)} available
+            </span>
+          </div>
+          <p className="font-ui text-[11px] text-tempo-muted mt-2">
             {overcommitment.deep_blocks} deep work block{overcommitment.deep_blocks !== 1 ? "s" : ""} available (2h+)
-          </div>
+          </p>
         </div>
       )}
 
       {/* Add Task Form */}
-      <form onSubmit={handleAddTask} className="border border-zinc-200 rounded-lg p-4 mb-6 space-y-4">
+      <form onSubmit={handleAddTask} className="border border-tempo-border p-5 mb-8 space-y-5">
         {/* Title */}
         <input
           type="text"
           placeholder="Task title..."
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          className="w-full border border-zinc-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          className="w-full font-body text-base border-b border-tempo-border bg-transparent px-0 py-2 text-tempo-text placeholder:text-tempo-muted focus:border-tempo-accent focus:outline-none transition-colors"
         />
 
         {/* Type toggle */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-medium text-zinc-500 w-12">Type</span>
+        <div className="flex items-center gap-3">
+          <span className="font-ui text-[11px] font-medium uppercase text-tempo-muted w-12" style={{ letterSpacing: "0.08em" }}>Type</span>
           <button
             type="button"
             onClick={() => setType("deep")}
-            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-              type === "deep" ? "bg-indigo-600 text-white" : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
+            className={`font-ui px-3 py-1.5 text-[12px] font-medium transition-colors ${
+              type === "deep"
+                ? "bg-tempo-text text-white"
+                : "bg-tempo-surface text-tempo-muted hover:text-tempo-text"
             }`}
+            style={{ letterSpacing: "0.04em" }}
           >
             Deep
           </button>
           <button
             type="button"
             onClick={() => setType("shallow")}
-            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-              type === "shallow" ? "bg-zinc-700 text-white" : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
+            className={`font-ui px-3 py-1.5 text-[12px] font-medium transition-colors ${
+              type === "shallow"
+                ? "bg-tempo-text text-white"
+                : "bg-tempo-surface text-tempo-muted hover:text-tempo-text"
             }`}
+            style={{ letterSpacing: "0.04em" }}
           >
             Shallow
           </button>
@@ -295,7 +362,7 @@ export default function PlanPage() {
 
         {/* Estimated minutes */}
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs font-medium text-zinc-500 w-12">Time</span>
+          <span className="font-ui text-[11px] font-medium uppercase text-tempo-muted w-12" style={{ letterSpacing: "0.08em" }}>Time</span>
           {PRESET_MINUTES.map((m) => (
             <button
               key={m}
@@ -304,11 +371,12 @@ export default function PlanPage() {
                 setEstimatedMinutes(m);
                 setCustomMinutes("");
               }}
-              className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
+              className={`font-ui px-2.5 py-1.5 text-[12px] font-medium transition-colors ${
                 !customMinutes && estimatedMinutes === m
-                  ? "bg-indigo-600 text-white"
-                  : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
+                  ? "bg-tempo-text text-white"
+                  : "bg-tempo-surface text-tempo-muted hover:text-tempo-text"
               }`}
+              style={{ letterSpacing: "0.04em" }}
             >
               {formatMinutes(m)}
             </button>
@@ -319,17 +387,17 @@ export default function PlanPage() {
             value={customMinutes}
             onChange={(e) => setCustomMinutes(e.target.value)}
             min={1}
-            className="w-20 border border-zinc-200 rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            className="w-20 font-ui text-[12px] border border-tempo-border bg-transparent px-2 py-1.5 text-tempo-text placeholder:text-tempo-muted focus:border-tempo-accent focus:outline-none transition-colors"
           />
         </div>
 
         {/* Goal link */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-medium text-zinc-500 w-12">Goal</span>
+        <div className="flex items-center gap-3">
+          <span className="font-ui text-[11px] font-medium uppercase text-tempo-muted w-12" style={{ letterSpacing: "0.08em" }}>Goal</span>
           <select
             value={goalId ?? ""}
             onChange={(e) => setGoalId(e.target.value ? Number(e.target.value) : null)}
-            className="border border-zinc-200 rounded-md px-2 py-1 text-xs text-zinc-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            className="font-ui text-[12px] border border-tempo-border bg-transparent px-2 py-1.5 text-tempo-text focus:border-tempo-accent focus:outline-none transition-colors"
           >
             <option value="">None</option>
             {goals.map((g) => (
@@ -341,31 +409,40 @@ export default function PlanPage() {
         </div>
 
         {/* Toggles row */}
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           <button
             type="button"
             onClick={() => setIsFrog(!isFrog)}
-            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-              isFrog ? "bg-green-600 text-white" : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
+            className={`font-ui px-3 py-1.5 text-[12px] font-medium transition-colors ${
+              isFrog
+                ? "bg-tempo-accent text-white"
+                : "bg-tempo-surface text-tempo-muted hover:text-tempo-text"
             }`}
+            style={{ letterSpacing: "0.04em" }}
           >
             Eat the Frog
           </button>
           <button
             type="button"
             onClick={() => setUrgent(!urgent)}
-            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-              urgent ? "bg-red-600 text-white" : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
+            className={`font-ui px-3 py-1.5 text-[12px] font-medium transition-colors ${
+              urgent
+                ? "bg-tempo-accent text-white"
+                : "bg-tempo-surface text-tempo-muted hover:text-tempo-text"
             }`}
+            style={{ letterSpacing: "0.04em" }}
           >
             Urgent
           </button>
           <button
             type="button"
             onClick={() => setImportant(!important)}
-            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-              important ? "bg-blue-600 text-white" : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
+            className={`font-ui px-3 py-1.5 text-[12px] font-medium transition-colors ${
+              important
+                ? "bg-tempo-text text-white"
+                : "bg-tempo-surface text-tempo-muted hover:text-tempo-text"
             }`}
+            style={{ letterSpacing: "0.04em" }}
           >
             Important
           </button>
@@ -373,7 +450,8 @@ export default function PlanPage() {
 
         <button
           type="submit"
-          className="w-full bg-indigo-600 text-white text-sm font-medium py-2 rounded-lg hover:bg-indigo-700 transition-colors"
+          className="w-full font-ui text-[13px] font-medium bg-tempo-text text-white py-2.5 hover:opacity-90 transition-opacity"
+          style={{ letterSpacing: "0.04em" }}
         >
           Add Task
         </button>
@@ -381,9 +459,9 @@ export default function PlanPage() {
 
       {/* Task List */}
       {tasks.length === 0 ? (
-        <div className="text-center py-12 text-zinc-400 text-sm">No tasks planned for this day.</div>
+        <div className="text-center py-12 font-body text-tempo-muted text-sm">No tasks planned for this day.</div>
       ) : (
-        <div className="mb-6">
+        <div className="mb-8">
           <TaskGroup label="Eat the Frog" tasks={frogTasks} />
           <TaskGroup label="Deep Work" tasks={deepTasks} />
           <TaskGroup label="Shallow Work" tasks={shallowTasks} />
@@ -392,24 +470,22 @@ export default function PlanPage() {
 
       {/* Summary Footer */}
       {tasks.length > 0 && (
-        <div className="border-t border-zinc-200 pt-4 grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
+        <div className="border-t border-tempo-border pt-6 grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
           <div>
-            <div className="text-lg font-semibold text-zinc-900">{formatMinutes(totalMinutes)}</div>
-            <div className="text-xs text-zinc-400">Total estimated</div>
+            <div className="font-display text-tempo-text" style={{ fontSize: "28px" }}>{formatMinutes(totalMinutes)}</div>
+            <div className="font-ui text-[11px] text-tempo-muted uppercase" style={{ letterSpacing: "0.08em" }}>Total</div>
           </div>
           <div>
-            <div className="text-lg font-semibold text-indigo-600">{formatMinutes(deepMinutes)}</div>
-            <div className="text-xs text-zinc-400">Deep work</div>
+            <div className="font-display text-tempo-text" style={{ fontSize: "28px" }}>{formatMinutes(deepMinutesTotal)}</div>
+            <div className="font-ui text-[11px] text-tempo-muted uppercase" style={{ letterSpacing: "0.08em" }}>Deep</div>
           </div>
           <div>
-            <div className="text-lg font-semibold text-zinc-600">{formatMinutes(shallowMinutes)}</div>
-            <div className="text-xs text-zinc-400">Shallow work</div>
+            <div className="font-display text-tempo-text" style={{ fontSize: "28px" }}>{formatMinutes(shallowMinutesTotal)}</div>
+            <div className="font-ui text-[11px] text-tempo-muted uppercase" style={{ letterSpacing: "0.08em" }}>Shallow</div>
           </div>
           <div>
-            <div className="text-lg font-semibold text-zinc-900">
-              {completedCount}/{tasks.length}
-            </div>
-            <div className="text-xs text-zinc-400">Completed</div>
+            <div className="font-display text-tempo-text" style={{ fontSize: "28px" }}>{completedCount}/{tasks.length}</div>
+            <div className="font-ui text-[11px] text-tempo-muted uppercase" style={{ letterSpacing: "0.08em" }}>Done</div>
           </div>
         </div>
       )}

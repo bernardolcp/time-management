@@ -38,7 +38,7 @@ interface Project {
 }
 
 interface PendingTask {
-  id: string; // local ID for key purposes
+  id: string;
   title: string;
   type: "deep" | "shallow";
   estimated_minutes: number;
@@ -50,22 +50,23 @@ interface PendingTask {
   source: "habit" | "manual";
 }
 
+interface BehaviorToday {
+  id: number;
+  title: string;
+  goal_id: number | null;
+  frequency: string;
+  today_done: boolean;
+  streak: number;
+}
+
 interface WizardState {
-  // Step 1
-  energy: number; // 1-5
+  energy: number;
   focusWord: string;
-  // Step 2
-  training: boolean;
-  spiritual: boolean;
-  family: boolean;
-  content: boolean;
-  contentDescription: string;
-  // Step 3
+  habitToggles: Record<number, boolean>;
   frogTitle: string;
   frogProjectId: number | null;
   frogMinutes: number;
   deepTasks: { title: string; minutes: number; projectId: number | null }[];
-  // Step 4
   shallowTasks: { title: string; minutes: number }[];
 }
 
@@ -76,15 +77,6 @@ interface WizardState {
 function getTodayISO(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-function formatDatePretty(): string {
-  return new Date().toLocaleDateString("pt-BR", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
 }
 
 function formatMinutes(n: number): string {
@@ -105,23 +97,6 @@ function getCurrentQuarter(): number {
   return 4;
 }
 
-const AREA_COLORS: Record<string, { bg: string; border: string; text: string }> = {
-  "Saude": { bg: "bg-emerald-50", border: "border-emerald-400", text: "text-emerald-700" },
-  "Saúde": { bg: "bg-emerald-50", border: "border-emerald-400", text: "text-emerald-700" },
-  "Health": { bg: "bg-emerald-50", border: "border-emerald-400", text: "text-emerald-700" },
-  "Família": { bg: "bg-rose-50", border: "border-rose-400", text: "text-rose-700" },
-  "Family": { bg: "bg-rose-50", border: "border-rose-400", text: "text-rose-700" },
-  "Relationships": { bg: "bg-rose-50", border: "border-rose-400", text: "text-rose-700" },
-  "Espiritual": { bg: "bg-violet-50", border: "border-violet-400", text: "text-violet-700" },
-  "Spiritual": { bg: "bg-violet-50", border: "border-violet-400", text: "text-violet-700" },
-  "Criativo": { bg: "bg-amber-50", border: "border-amber-400", text: "text-amber-700" },
-  "Creative": { bg: "bg-amber-50", border: "border-amber-400", text: "text-amber-700" },
-};
-
-function getAreaColor(area: string) {
-  return AREA_COLORS[area] || { bg: "bg-zinc-50", border: "border-zinc-300", text: "text-zinc-700" };
-}
-
 let localIdCounter = 0;
 function nextLocalId(): string {
   return `local-${++localIdCounter}`;
@@ -132,12 +107,18 @@ function nextLocalId(): string {
 // ---------------------------------------------------------------------------
 
 const ENERGY_OPTIONS = [
-  { value: 1, emoji: "\u{1F634}", label: "Exausto" },
-  { value: 2, emoji: "\u{1F610}", label: "Baixa" },
-  { value: 3, emoji: "\u{1F642}", label: "Normal" },
-  { value: 4, emoji: "\u{1F60A}", label: "Boa" },
-  { value: 5, emoji: "\u{26A1}", label: "Energia total" },
+  { value: 1, label: "1" },
+  { value: 2, label: "2" },
+  { value: 3, label: "3" },
+  { value: 4, label: "4" },
+  { value: 5, label: "5" },
 ];
+
+// ---------------------------------------------------------------------------
+// Step labels
+// ---------------------------------------------------------------------------
+
+const STEP_LABELS = ["Energy", "Habits", "Deep Work", "Shallow", "Review"];
 
 // ---------------------------------------------------------------------------
 // Component
@@ -155,6 +136,7 @@ export default function DailyEntryPage() {
     return 1;
   });
   const [goals, setGoals] = useState<Goal[]>([]);
+  const [behaviors, setBehaviors] = useState<BehaviorToday[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [overcommitment, setOvercommitment] = useState<OvercommitmentData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -169,7 +151,10 @@ export default function DailyEntryPage() {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         try {
-          return JSON.parse(saved);
+          const parsed = JSON.parse(saved);
+          // Ensure habitToggles exists (migration from old format)
+          if (!parsed.habitToggles) parsed.habitToggles = {};
+          return parsed;
         } catch {
           // ignore
         }
@@ -178,11 +163,7 @@ export default function DailyEntryPage() {
     return {
       energy: 0,
       focusWord: "",
-      training: false,
-      spiritual: false,
-      family: false,
-      content: false,
-      contentDescription: "",
+      habitToggles: {},
       frogTitle: "",
       frogProjectId: null,
       frogMinutes: 90,
@@ -200,7 +181,7 @@ export default function DailyEntryPage() {
     localStorage.setItem(`daily-entry-step-${today}`, String(step));
   }, [step, today]);
 
-  // Quick-add inputs (not part of wizard state)
+  // Quick-add inputs
   const [deepInput, setDeepInput] = useState("");
   const [deepMinutes, setDeepMinutes] = useState(60);
   const [deepProjectId, setDeepProjectId] = useState<number | null>(null);
@@ -208,7 +189,7 @@ export default function DailyEntryPage() {
   const [shallowInput, setShallowInput] = useState("");
   const [shallowMinutes, setShallowMinutes] = useState(30);
 
-  // Direction of step transition
+  // Transition
   const [transitionDir, setTransitionDir] = useState<"next" | "prev">("next");
   const [visible, setVisible] = useState(true);
 
@@ -224,16 +205,34 @@ export default function DailyEntryPage() {
     if (res.ok) setProjects(await res.json());
   }, []);
 
+  const fetchBehaviors = useCallback(async () => {
+    const res = await fetch("/api/behaviors/today");
+    if (res.ok) {
+      const data: BehaviorToday[] = await res.json();
+      setBehaviors(data);
+      // Initialize toggles from today_done status (only if not already set from localStorage)
+      setWizard((prev) => {
+        const hasToggles = prev.habitToggles && Object.keys(prev.habitToggles).length > 0;
+        if (hasToggles) return prev;
+        const toggles: Record<number, boolean> = {};
+        for (const b of data) {
+          toggles[b.id] = b.today_done;
+        }
+        return { ...prev, habitToggles: toggles };
+      });
+    }
+  }, []);
+
   const fetchOvercommitment = useCallback(async () => {
     const res = await fetch(`/api/overcommitment?date=${today}`);
     if (res.ok) setOvercommitment(await res.json());
   }, [today]);
 
   useEffect(() => {
-    Promise.all([fetchGoals(), fetchProjects(), fetchOvercommitment()]).finally(() =>
+    Promise.all([fetchGoals(), fetchBehaviors(), fetchProjects(), fetchOvercommitment()]).finally(() =>
       setLoading(false)
     );
-  }, [fetchGoals, fetchProjects, fetchOvercommitment]);
+  }, [fetchGoals, fetchBehaviors, fetchProjects, fetchOvercommitment]);
 
   // ---- Navigation ----
 
@@ -260,56 +259,24 @@ export default function DailyEntryPage() {
   function buildAllTasks(): PendingTask[] {
     const tasks: PendingTask[] = [];
 
-    // Habit-based tasks (no deep/shallow classification — these are habits)
-    if (wizard.training) {
-      const goalId = findGoalByArea(["Saude", "Saúde", "Health"]);
-      tasks.push({
-        id: nextLocalId(),
-        title: "Treino",
-        type: "shallow",
-        estimated_minutes: 45,
-        goal_id: goalId,
-        project_id: null,
-        is_frog: 0,
-        urgent: 0,
-        important: 1,
-        source: "habit",
-      });
+    // Add toggled behaviors as habit tasks
+    for (const b of behaviors) {
+      if (wizard.habitToggles[b.id]) {
+        tasks.push({
+          id: nextLocalId(),
+          title: b.title,
+          type: "shallow",
+          estimated_minutes: 30,
+          goal_id: b.goal_id,
+          project_id: null,
+          is_frog: 0,
+          urgent: 0,
+          important: 1,
+          source: "habit",
+        });
+      }
     }
 
-    if (wizard.spiritual) {
-      const goalId = findGoalByArea(["Espiritual", "Spiritual"]);
-      tasks.push({
-        id: nextLocalId(),
-        title: "Momento espiritual",
-        type: "shallow",
-        estimated_minutes: 10,
-        goal_id: goalId,
-        project_id: null,
-        is_frog: 0,
-        urgent: 0,
-        important: 1,
-        source: "habit",
-      });
-    }
-
-    if (wizard.content && wizard.contentDescription.trim()) {
-      const goalId = findGoalByArea(["Criativo", "Creative"]);
-      tasks.push({
-        id: nextLocalId(),
-        title: wizard.contentDescription.trim(),
-        type: "shallow",
-        estimated_minutes: 30,
-        goal_id: goalId,
-        project_id: null,
-        is_frog: 0,
-        urgent: 0,
-        important: 1,
-        source: "habit",
-      });
-    }
-
-    // Frog task
     if (wizard.frogTitle.trim()) {
       tasks.push({
         id: nextLocalId(),
@@ -325,7 +292,6 @@ export default function DailyEntryPage() {
       });
     }
 
-    // Deep tasks
     for (const t of wizard.deepTasks) {
       if (t.title.trim()) {
         tasks.push({
@@ -343,7 +309,6 @@ export default function DailyEntryPage() {
       }
     }
 
-    // Shallow tasks
     for (const t of wizard.shallowTasks) {
       if (t.title.trim()) {
         tasks.push({
@@ -364,12 +329,6 @@ export default function DailyEntryPage() {
     return tasks;
   }
 
-  function findGoalByArea(areas: string[]): number | null {
-    const lowerAreas = areas.map((a) => a.toLowerCase());
-    const goal = goals.find((g) => lowerAreas.includes(g.area.toLowerCase()));
-    return goal?.id ?? null;
-  }
-
   // ---- Computed values for Step 5 ----
 
   const allTasks = buildAllTasks();
@@ -381,7 +340,6 @@ export default function DailyEntryPage() {
     .reduce((s, t) => s + t.estimated_minutes, 0);
   const totalCommitted = totalDeep + totalShallow;
 
-  // Simulated overcommitment for preview (existing committed + new tasks)
   const existingCommitted = overcommitment?.committed_minutes ?? 0;
   const previewCommitted = existingCommitted + totalCommitted;
   const previewAvailable = overcommitment?.available_minutes ?? 480;
@@ -393,7 +351,7 @@ export default function DailyEntryPage() {
     120
   );
 
-  // ---- Goals progress nudge (Step 1) ----
+  // ---- Goals progress nudge ----
 
   const q = getCurrentQuarter();
   const goalsNeedingAttention = goals
@@ -439,22 +397,21 @@ export default function DailyEntryPage() {
             q4_target: g.q4_target,
             q4_actual: g.q4_actual,
           })),
-          habits_today: {
-            training: wizard.training,
-            spiritual: wizard.spiritual,
-            family: wizard.family,
-            content: wizard.content,
-          },
+          habits_today: Object.fromEntries(
+            behaviors
+              .filter((b) => wizard.habitToggles[b.id])
+              .map((b) => [b.title, true])
+          ),
         }),
       });
       if (res.ok) {
         const data = await res.json();
         setCoachResponse(data.message || data.response || JSON.stringify(data));
       } else {
-        setCoachResponse("Desculpe, o coach nao esta disponivel agora. Comece seu dia com confianca!");
+        setCoachResponse("Coach unavailable right now. Start your day with confidence!");
       }
     } catch {
-      setCoachResponse("Desculpe, o coach nao esta disponivel agora. Comece seu dia com confianca!");
+      setCoachResponse("Coach unavailable right now. Start your day with confidence!");
     }
     setCoachLoading(false);
   }
@@ -464,7 +421,6 @@ export default function DailyEntryPage() {
   async function handleStart() {
     setSaving(true);
     try {
-      // Batch create all tasks
       for (const task of allTasks) {
         await fetch("/api/tasks", {
           method: "POST",
@@ -483,28 +439,41 @@ export default function DailyEntryPage() {
         });
       }
 
-      // Save daily entry
-      const entryRes = await fetch("/api/daily-entry", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          date: today,
-          energy_level: wizard.energy,
-          focus_word: wizard.focusWord,
-          training: wizard.training ? 1 : 0,
-          spiritual: wizard.spiritual ? 1 : 0,
-          family_day: wizard.family ? 1 : 0,
-          content_creation: wizard.content ? 1 : 0,
-        }),
-      });
-      if (!entryRes.ok) {
-        console.error("Failed to save daily entry:", await entryRes.text());
+      // Log behavior toggles
+      for (const b of behaviors) {
+        const toggled = wizard.habitToggles[b.id] ?? false;
+        if (toggled !== b.today_done) {
+          try {
+            await fetch("/api/behaviors/log", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                behavior_id: b.id,
+                date: today,
+              }),
+            });
+          } catch {
+            // best effort
+          }
+        }
       }
 
-      // Clear saved state after successful save
+      try {
+        await fetch("/api/daily-entry", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            date: today,
+            energy_level: wizard.energy,
+            focus_word: wizard.focusWord,
+          }),
+        });
+      } catch {
+        // daily-entry API may not exist yet
+      }
+
       localStorage.removeItem(STORAGE_KEY);
       localStorage.removeItem(`daily-entry-step-${today}`);
-
       router.push("/");
     } catch {
       setSaving(false);
@@ -558,49 +527,88 @@ export default function DailyEntryPage() {
 
   // ---- Can advance? ----
 
-  const canNext =
-    step === 1
-      ? wizard.energy > 0
-      : step === 2
-        ? true
-        : step === 3
-          ? true
-          : step === 4
-            ? true
-            : true;
+  const canNext = step === 1 ? wizard.energy > 0 : true;
 
   // ---- Loading state ----
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="animate-pulse text-zinc-400 text-sm">Carregando...</div>
+      <div className="flex items-center justify-center h-full min-h-screen">
+        <p className="font-ui text-sm text-tempo-muted animate-pulse">Loading...</p>
       </div>
     );
   }
 
+  const prettyDate = new Date().toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  });
+
   // ---- Render ----
 
   return (
-    <div className="max-w-2xl mx-auto min-h-[calc(100vh-4rem)] flex flex-col">
-      {/* Progress dots */}
-      <div className="flex items-center justify-center gap-2 pt-4 pb-8">
-        {[1, 2, 3, 4, 5].map((s) => (
-          <button
-            key={s}
-            onClick={() => {
-              if (s < step) goToStep(s);
-            }}
-            className={`w-3 h-3 rounded-full transition-all duration-300 ${
-              s === step
-                ? "bg-emerald-500 scale-125"
-                : s < step
-                  ? "bg-emerald-300 cursor-pointer hover:bg-emerald-400"
-                  : "bg-zinc-200"
-            }`}
-            aria-label={`Passo ${s}`}
-          />
-        ))}
+    <div className="max-w-[640px] px-14 py-12 min-h-screen flex flex-col">
+      {/* Page header */}
+      <div className="mb-12">
+        <p className="font-accent text-xl text-tempo-muted mb-2">{prettyDate}</p>
+        <h1 className="font-display text-tempo-text" style={{ fontSize: "36px", letterSpacing: "-0.01em" }}>
+          Start Your Day
+        </h1>
+      </div>
+
+      {/* Step indicator — numbered circles with connecting lines */}
+      <div className="flex items-center mb-12">
+        {STEP_LABELS.map((label, i) => {
+          const s = i + 1;
+          const isActive = s === step;
+          const isDone = s < step;
+          return (
+            <div key={s} className="contents">
+              {i > 0 && (
+                <div
+                  className={`flex-1 h-px min-w-[24px] mx-3 transition-colors ${
+                    isDone ? "bg-tempo-text" : "bg-tempo-border"
+                  }`}
+                />
+              )}
+              <button
+                onClick={() => { if (isDone) goToStep(s); }}
+                className="flex items-center gap-2"
+              >
+                <div
+                  className={`flex items-center justify-center font-ui text-xs font-medium flex-shrink-0 rounded-full transition-all ${
+                    isActive
+                      ? "bg-tempo-text text-tempo-bg"
+                      : isDone
+                        ? "bg-tempo-text text-tempo-bg cursor-pointer"
+                        : "text-tempo-muted"
+                  }`}
+                  style={{
+                    width: "28px", height: "28px",
+                    border: !isActive && !isDone ? "1.5px solid var(--border)" : "none",
+                  }}
+                >
+                  {isDone ? (
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={3}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                    </svg>
+                  ) : (
+                    s
+                  )}
+                </div>
+                <span
+                  className={`font-ui text-xs uppercase ${
+                    isActive ? "text-tempo-text font-medium" : "text-tempo-muted"
+                  }`}
+                  style={{ letterSpacing: "0.08em" }}
+                >
+                  {label}
+                </span>
+              </button>
+            </div>
+          );
+        })}
       </div>
 
       {/* Step content with transition */}
@@ -613,277 +621,169 @@ export default function DailyEntryPage() {
               : "opacity-0 -translate-y-4"
         }`}
       >
-        {/* ===== STEP 1: Bom dia! ===== */}
+        {/* ===== STEP 1: Energy & Focus ===== */}
         {step === 1 && (
-          <div className="space-y-8">
-            <div className="text-center">
-              <h1 className="text-4xl font-bold text-zinc-900 mb-2">
-                Bom dia! {"\u{2600}\u{FE0F}"}
-              </h1>
-              <p className="text-zinc-500 capitalize">{formatDatePretty()}</p>
-            </div>
-
+          <div className="space-y-12">
             {/* Energy selector */}
-            <div className="space-y-3">
-              <p className="text-center text-lg font-medium text-zinc-700">
-                Como esta sua energia hoje?
+            <div>
+              <h2 className="font-display text-tempo-text mb-2" style={{ fontSize: "24px" }}>Energy</h2>
+              <p className="font-body text-[15px] mb-7" style={{ color: "var(--journal)" }}>How are you feeling this morning?</p>
+
+              <p className="font-ui text-[11px] font-medium uppercase text-tempo-muted mb-3" style={{ letterSpacing: "0.12em" }}>
+                How are you feeling?
               </p>
-              <div className="flex justify-center gap-3">
+              <div className="flex gap-3 mb-8">
                 {ENERGY_OPTIONS.map((opt) => (
                   <button
                     key={opt.value}
                     onClick={() => setWizard((prev) => ({ ...prev, energy: opt.value }))}
-                    className={`flex flex-col items-center gap-1 w-16 h-20 rounded-xl border-2 transition-all duration-200 ${
-                      wizard.energy === opt.value
-                        ? "border-emerald-500 bg-emerald-50 scale-110 shadow-md"
-                        : "border-zinc-200 bg-white hover:border-zinc-300 hover:shadow-sm"
-                    }`}
+                    className="relative"
                   >
-                    <span className="text-2xl mt-2">{opt.emoji}</span>
-                    <span className="text-[10px] text-zinc-500 font-medium">{opt.label}</span>
+                    <div
+                      className={`rounded-full transition-all ${
+                        wizard.energy >= opt.value
+                          ? "bg-tempo-accent border-tempo-accent"
+                          : "border-tempo-border bg-transparent"
+                      }`}
+                      style={{
+                        width: "36px", height: "36px",
+                        border: wizard.energy >= opt.value ? "1.5px solid var(--accent)" : "1.5px solid var(--border)",
+                      }}
+                    />
+                    {opt.value === 1 && (
+                      <span className="absolute -bottom-5 left-1/2 -translate-x-1/2 font-ui text-[11px] text-tempo-muted whitespace-nowrap">Low</span>
+                    )}
+                    {opt.value === 5 && (
+                      <span className="absolute -bottom-5 left-1/2 -translate-x-1/2 font-ui text-[11px] text-tempo-muted whitespace-nowrap">High</span>
+                    )}
                   </button>
                 ))}
               </div>
+              {wizard.energy > 0 && (
+                <p className="font-ui text-xs text-tempo-muted mt-6">
+                  {wizard.energy} / 5 — {wizard.energy >= 4 ? "Good energy today" : wizard.energy >= 2 ? "Moderate energy" : "Low energy — protect your focus blocks"}
+                </p>
+              )}
             </div>
 
             {/* Focus word */}
-            <div className="space-y-3">
-              <p className="text-center text-lg font-medium text-zinc-700">
-                Uma palavra para definir o foco de hoje:
+            <div>
+              <p className="font-ui text-[11px] font-medium uppercase text-tempo-muted mb-2" style={{ letterSpacing: "0.12em" }}>
+                Daily Intention
               </p>
               <input
                 type="text"
                 value={wizard.focusWord}
                 onChange={(e) => setWizard((prev) => ({ ...prev, focusWord: e.target.value }))}
-                placeholder="Ex: disciplina, entrega, calma..."
-                className="w-full text-center text-lg border-2 border-zinc-200 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500 transition-colors"
-                maxLength={30}
+                placeholder="Ship the landing page and protect deep work time"
+                className="w-full font-accent bg-transparent text-tempo-text px-0 py-2 border-b-2 border-tempo-border focus:border-tempo-accent transition-colors"
+                style={{ fontSize: "28px", lineHeight: "1.3" }}
+                maxLength={120}
               />
+              <p className="font-body text-sm italic text-tempo-muted mt-2">
+                What&apos;s your main intention for today?
+              </p>
             </div>
 
             {/* Goals nudge */}
             {goalsNeedingAttention.length > 0 && (
-              <div className="rounded-xl border border-amber-200 bg-amber-50 p-5">
-                <p className="text-sm font-medium text-amber-800 mb-3">
-                  {"\u{1F4CA}"} Areas que precisam de atencao neste trimestre:
+              <div className="pl-6 border-l-2 border-tempo-accent space-y-2">
+                <p className="font-ui text-[11px] font-medium uppercase text-tempo-muted" style={{ letterSpacing: "0.12em" }}>
+                  Goals needing attention this quarter
                 </p>
-                <div className="space-y-2">
-                  {goalsNeedingAttention.map((g) => {
-                    const target = g[`q${q}_target` as keyof Goal] as number;
-                    const actual = g[`q${q}_actual` as keyof Goal] as number;
-                    const pct = target > 0 ? Math.round((actual / target) * 100) : 0;
-                    const colors = getAreaColor(g.area);
-                    return (
-                      <div key={g.id} className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={`text-xs font-medium px-2 py-0.5 rounded-full ${colors.bg} ${colors.text}`}
-                          >
-                            {g.area}
-                          </span>
-                          <span className="text-sm text-zinc-700">{g.title}</span>
-                        </div>
-                        <span className="text-sm font-medium text-amber-700">{pct}%</span>
-                      </div>
-                    );
-                  })}
-                </div>
+                {goalsNeedingAttention.map((g) => {
+                  const target = g[`q${q}_target` as keyof Goal] as number;
+                  const actual = g[`q${q}_actual` as keyof Goal] as number;
+                  const pct = target > 0 ? Math.round((actual / target) * 100) : 0;
+                  return (
+                    <div key={g.id} className="flex items-center justify-between">
+                      <span className="font-body text-sm text-tempo-text">{g.title}</span>
+                      <span className="font-ui text-xs text-tempo-accent">{pct}%</span>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
         )}
 
-        {/* ===== STEP 2: Corpo & Espírito ===== */}
+        {/* ===== STEP 2: Habits ===== */}
         {step === 2 && (
-          <div className="space-y-8">
-            <div className="text-center">
-              <h2 className="text-3xl font-bold text-zinc-900 mb-2">
-                Corpo & Espirito
-              </h2>
-              <p className="text-zinc-500">Selecione os habitos de hoje</p>
-            </div>
+          <div>
+            <h2 className="font-display text-tempo-text mb-2" style={{ fontSize: "24px" }}>Habits</h2>
+            <p className="font-body text-[15px] mb-7" style={{ color: "var(--journal)" }}>
+              Check off what you&apos;ve done or plan to do today.
+            </p>
 
-            <div className="space-y-4">
-              {/* Training */}
-              <button
-                onClick={() => setWizard((prev) => ({ ...prev, training: !prev.training }))}
-                className={`w-full flex items-center gap-4 p-5 rounded-xl border-2 transition-all duration-200 text-left ${
-                  wizard.training
-                    ? "border-emerald-500 bg-emerald-50 shadow-sm"
-                    : "border-zinc-200 bg-white hover:border-zinc-300"
-                }`}
-              >
-                <span className="text-3xl">{"\u{1F4AA}"}</span>
-                <div className="flex-1">
-                  <p className="font-semibold text-zinc-900">Vai treinar hoje?</p>
-                  <p className="text-xs text-zinc-500 mt-0.5">45 min</p>
-                </div>
-                <div
-                  className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${
-                    wizard.training
-                      ? "border-emerald-500 bg-emerald-500"
-                      : "border-zinc-300"
-                  }`}
-                >
-                  {wizard.training && (
-                    <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={3}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                    </svg>
-                  )}
-                </div>
-              </button>
-
-              {/* Spiritual */}
-              <button
-                onClick={() => setWizard((prev) => ({ ...prev, spiritual: !prev.spiritual }))}
-                className={`w-full flex items-center gap-4 p-5 rounded-xl border-2 transition-all duration-200 text-left ${
-                  wizard.spiritual
-                    ? "border-violet-500 bg-violet-50 shadow-sm"
-                    : "border-zinc-200 bg-white hover:border-zinc-300"
-                }`}
-              >
-                <span className="text-3xl">{"\u{1F64F}"}</span>
-                <div className="flex-1">
-                  <p className="font-semibold text-zinc-900">Momento espiritual hoje?</p>
-                  <p className="text-xs text-zinc-500 mt-0.5">10 min</p>
-                </div>
-                <div
-                  className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${
-                    wizard.spiritual
-                      ? "border-violet-500 bg-violet-500"
-                      : "border-zinc-300"
-                  }`}
-                >
-                  {wizard.spiritual && (
-                    <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={3}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                    </svg>
-                  )}
-                </div>
-              </button>
-
-              {/* Family */}
-              <button
-                onClick={() => setWizard((prev) => ({ ...prev, family: !prev.family }))}
-                className={`w-full flex items-center gap-4 p-5 rounded-xl border-2 transition-all duration-200 text-left ${
-                  wizard.family
-                    ? "border-rose-500 bg-rose-50 shadow-sm"
-                    : "border-zinc-200 bg-white hover:border-zinc-300"
-                }`}
-              >
-                <span className="text-3xl">{"\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}"}</span>
-                <div className="flex-1">
-                  <p className="font-semibold text-zinc-900">Hoje e dia de familia?</p>
-                  <p className="text-xs text-zinc-500 mt-0.5">Marca o dia como tempo em familia</p>
-                </div>
-                <div
-                  className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${
-                    wizard.family
-                      ? "border-rose-500 bg-rose-500"
-                      : "border-zinc-300"
-                  }`}
-                >
-                  {wizard.family && (
-                    <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={3}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                    </svg>
-                  )}
-                </div>
-              </button>
-
-              {/* Content creation */}
-              <div>
-                <button
-                  onClick={() => setWizard((prev) => ({ ...prev, content: !prev.content }))}
-                  className={`w-full flex items-center gap-4 p-5 rounded-xl border-2 transition-all duration-200 text-left ${
-                    wizard.content
-                      ? "border-amber-500 bg-amber-50 shadow-sm"
-                      : "border-zinc-200 bg-white hover:border-zinc-300"
-                  }`}
-                >
-                  <span className="text-3xl">{"\u{1F3A8}"}</span>
-                  <div className="flex-1">
-                    <p className="font-semibold text-zinc-900">Vai produzir conteudo?</p>
-                    <p className="text-xs text-zinc-500 mt-0.5">30 min</p>
-                  </div>
-                  <div
-                    className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${
-                      wizard.content
-                        ? "border-amber-500 bg-amber-500"
-                        : "border-zinc-300"
-                    }`}
-                  >
-                    {wizard.content && (
-                      <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={3}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                      </svg>
-                    )}
-                  </div>
-                </button>
-
-                {/* Content description input */}
-                {wizard.content && (
-                  <div className="mt-3 ml-16 mr-4">
-                    <input
-                      type="text"
-                      value={wizard.contentDescription}
-                      onChange={(e) =>
-                        setWizard((prev) => ({ ...prev, contentDescription: e.target.value }))
-                      }
-                      placeholder="Qual conteudo vai produzir?"
-                      className="w-full border-2 border-amber-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500 transition-colors"
-                      autoFocus
-                    />
-                  </div>
-                )}
-              </div>
+            <div>
+              {behaviors.length === 0 && (
+                <p className="font-body text-sm text-tempo-muted italic py-4">
+                  No habits defined yet. Add behaviors on the Goals page.
+                </p>
+              )}
+              {behaviors.map((b) => (
+                <HabitToggle
+                  key={b.id}
+                  label={b.title}
+                  sublabel={b.streak > 0 ? `${b.streak} day streak` : "Start today"}
+                  active={wizard.habitToggles[b.id] ?? false}
+                  onToggle={() =>
+                    setWizard((prev) => ({
+                      ...prev,
+                      habitToggles: {
+                        ...prev.habitToggles,
+                        [b.id]: !(prev.habitToggles[b.id] ?? false),
+                      },
+                    }))
+                  }
+                />
+              ))}
             </div>
           </div>
         )}
 
         {/* ===== STEP 3: Deep Work ===== */}
         {step === 3 && (
-          <div className="space-y-8">
-            <div className="text-center">
-              <h2 className="text-3xl font-bold text-zinc-900 mb-2">
-                Deep Work
-              </h2>
-              <p className="text-zinc-500">
-                {overcommitment
-                  ? `${overcommitment.deep_blocks} bloco${overcommitment.deep_blocks !== 1 ? "s" : ""} de deep work disponivel${overcommitment.deep_blocks !== 1 ? "is" : ""}`
-                  : "Defina suas prioridades do dia"}
-              </p>
-            </div>
+          <div>
+            <h2 className="font-display text-tempo-text mb-2" style={{ fontSize: "24px" }}>Deep Work</h2>
+            <p className="font-body text-[15px] mb-7" style={{ color: "var(--journal)" }}>
+              {overcommitment
+                ? `${overcommitment.deep_blocks} deep work block${overcommitment.deep_blocks !== 1 ? "s" : ""} available today.`
+                : "Define your priorities for today."}
+            </p>
 
             {/* Frog */}
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <span className="text-xl">{"\u{1F438}"}</span>
-                <p className="text-lg font-semibold text-zinc-900">
-                  Qual e o frog do dia?
+            <div className="mb-10">
+              <div className="flex items-baseline gap-3 mb-4">
+                <p className="font-ui text-[11px] font-medium uppercase text-tempo-muted" style={{ letterSpacing: "0.12em" }}>
+                  Today&apos;s Frog
                 </p>
+                <span
+                  className="font-ui font-semibold uppercase bg-tempo-accent-light text-tempo-accent"
+                  style={{ fontSize: "9px", letterSpacing: "0.14em", padding: "2px 7px" }}
+                >
+                  Hardest first
+                </span>
               </div>
-              <p className="text-xs text-zinc-500 -mt-1 ml-8">
-                A tarefa mais importante e dificil. Faca primeiro.
-              </p>
               <input
                 type="text"
                 value={wizard.frogTitle}
                 onChange={(e) => setWizard((prev) => ({ ...prev, frogTitle: e.target.value }))}
-                placeholder="Ex: Escrever proposta comercial..."
-                className="w-full border-2 border-zinc-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-emerald-500 transition-colors"
+                placeholder="e.g. Write commercial proposal..."
+                className="w-full font-body text-base border-b border-tempo-border bg-transparent px-0 py-2 text-tempo-text placeholder:text-tempo-muted focus:border-tempo-accent transition-colors"
               />
-              <div className="flex items-center gap-3 flex-wrap">
-                <span className="text-xs text-zinc-500">Tempo:</span>
+              <div className="flex items-center gap-2 flex-wrap mt-3">
+                <span className="font-ui text-[11px] uppercase text-tempo-muted" style={{ letterSpacing: "0.1em" }}>Time:</span>
                 {[30, 60, 90, 120].map((m) => (
                   <button
                     key={m}
                     onClick={() => setWizard((prev) => ({ ...prev, frogMinutes: m }))}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                    className={`font-ui text-[13px] font-medium px-4 py-2 transition-colors ${
                       wizard.frogMinutes === m
-                        ? "bg-emerald-600 text-white"
-                        : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
+                        ? "bg-tempo-text text-tempo-bg"
+                        : "border border-tempo-border text-tempo-muted hover:border-tempo-text hover:text-tempo-text"
                     }`}
+                    style={{ letterSpacing: "0.04em" }}
                   >
                     {formatMinutes(m)}
                   </button>
@@ -896,46 +796,43 @@ export default function DailyEntryPage() {
                       frogProjectId: e.target.value ? Number(e.target.value) : null,
                     }))
                   }
-                  className="ml-auto border border-zinc-200 rounded-lg px-2 py-1.5 text-xs text-zinc-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  className="ml-auto font-ui text-xs border border-tempo-border bg-transparent px-3 py-2 text-tempo-text focus:border-tempo-accent"
                 >
-                  <option value="">Sem projeto</option>
+                  <option value="">No project</option>
                   {projects.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
+                    <option key={p.id} value={p.id}>{p.name}</option>
                   ))}
                 </select>
               </div>
             </div>
 
             {/* More deep tasks */}
-            <div className="space-y-3">
-              <p className="text-lg font-semibold text-zinc-900">
-                Outras tasks de deep work
+            <div>
+              <p className="font-ui text-[11px] font-medium uppercase text-tempo-muted mb-4" style={{ letterSpacing: "0.12em" }}>
+                Other deep work
               </p>
 
-              {/* Existing deep tasks */}
               {wizard.deepTasks.length > 0 && (
-                <div className="space-y-2">
+                <div>
                   {wizard.deepTasks.map((t, i) => (
                     <div
                       key={i}
-                      className="flex items-center gap-3 bg-white border border-zinc-200 rounded-lg px-4 py-2.5"
+                      className="flex items-center gap-3 border-b border-tempo-border py-3"
                     >
-                      <span className="flex-1 text-sm text-zinc-900">{t.title}</span>
-                      <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-zinc-100 text-zinc-600">
+                      <span className="flex-1 font-body text-base text-tempo-text">{t.title}</span>
+                      <span className="font-ui text-[13px] text-tempo-muted tabular-nums">
                         {formatMinutes(t.minutes)}
                       </span>
                       {t.projectId && (
-                        <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">
+                        <span className="font-ui text-xs text-tempo-muted">
                           {projects.find((p) => p.id === t.projectId)?.name}
                         </span>
                       )}
                       <button
                         onClick={() => removeDeepTask(i)}
-                        className="text-zinc-300 hover:text-red-500 transition-colors"
+                        className="text-tempo-muted hover:text-tempo-accent transition-colors"
                       >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
                         </svg>
                       </button>
@@ -944,8 +841,7 @@ export default function DailyEntryPage() {
                 </div>
               )}
 
-              {/* Quick add */}
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 mt-3">
                 <input
                   type="text"
                   value={deepInput}
@@ -956,27 +852,29 @@ export default function DailyEntryPage() {
                       addDeepTask();
                     }
                   }}
-                  placeholder="Adicionar tarefa..."
-                  className="flex-1 border-2 border-zinc-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-emerald-500 transition-colors"
+                  placeholder="Add task..."
+                  className="flex-1 font-body text-base border-b border-tempo-border bg-transparent px-0 py-2 text-tempo-text placeholder:text-tempo-muted focus:border-tempo-accent transition-colors"
                 />
                 <button
                   onClick={addDeepTask}
                   disabled={!deepInput.trim()}
-                  className="px-4 py-2.5 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  className="font-ui text-[13px] font-medium bg-tempo-text text-tempo-bg px-5 py-2 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+                  style={{ letterSpacing: "0.04em" }}
                 >
-                  +
+                  Add
                 </button>
               </div>
-              <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-2 flex-wrap mt-3">
                 {[30, 60, 90, 120].map((m) => (
                   <button
                     key={m}
                     onClick={() => setDeepMinutes(m)}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                    className={`font-ui text-[13px] font-medium px-4 py-2 transition-colors ${
                       deepMinutes === m
-                        ? "bg-emerald-600 text-white"
-                        : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
+                        ? "bg-tempo-text text-tempo-bg"
+                        : "border border-tempo-border text-tempo-muted hover:border-tempo-text hover:text-tempo-text"
                     }`}
+                    style={{ letterSpacing: "0.04em" }}
                   >
                     {formatMinutes(m)}
                   </button>
@@ -984,39 +882,34 @@ export default function DailyEntryPage() {
                 <select
                   value={deepProjectId ?? ""}
                   onChange={(e) => setDeepProjectId(e.target.value ? Number(e.target.value) : null)}
-                  className="ml-auto border border-zinc-200 rounded-lg px-2 py-1.5 text-xs text-zinc-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  className="ml-auto font-ui text-xs border border-tempo-border bg-transparent px-3 py-2 text-tempo-text focus:border-tempo-accent"
                 >
-                  <option value="">Sem projeto</option>
+                  <option value="">No project</option>
                   {projects.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
+                    <option key={p.id} value={p.id}>{p.name}</option>
                   ))}
                 </select>
-                {/* Add new project inline */}
-                <div className="flex items-center gap-1">
-                  <input
-                    type="text"
-                    value={newProjectName}
-                    onChange={(e) => setNewProjectName(e.target.value)}
-                    placeholder="+ Projeto"
-                    className="w-24 border border-zinc-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    onKeyDown={async (e) => {
-                      if (e.key === "Enter" && newProjectName.trim()) {
-                        e.preventDefault();
-                        const res = await fetch("/api/projects", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ name: newProjectName.trim() }),
-                        });
-                        if (res.ok) {
-                          await fetchProjects();
-                          setNewProjectName("");
-                        }
+                <input
+                  type="text"
+                  value={newProjectName}
+                  onChange={(e) => setNewProjectName(e.target.value)}
+                  placeholder="+ Project"
+                  className="w-24 font-ui text-xs border border-tempo-border bg-transparent px-3 py-2 text-tempo-text placeholder:text-tempo-muted focus:border-tempo-accent"
+                  onKeyDown={async (e) => {
+                    if (e.key === "Enter" && newProjectName.trim()) {
+                      e.preventDefault();
+                      const res = await fetch("/api/projects", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ name: newProjectName.trim() }),
+                      });
+                      if (res.ok) {
+                        await fetchProjects();
+                        setNewProjectName("");
                       }
-                    }}
-                  />
-                </div>
+                    }
+                  }}
+                />
               </div>
             </div>
           </div>
@@ -1024,170 +917,173 @@ export default function DailyEntryPage() {
 
         {/* ===== STEP 4: Shallow Work ===== */}
         {step === 4 && (
-          <div className="space-y-8">
-            <div className="text-center">
-              <h2 className="text-3xl font-bold text-zinc-900 mb-2">
-                Shallow Work
-              </h2>
-              <p className="text-zinc-500">Tasks de apoio e administrativas</p>
-            </div>
+          <div>
+            <h2 className="font-display text-tempo-text mb-2" style={{ fontSize: "24px" }}>Shallow Work</h2>
+            <p className="font-body text-[15px] mb-7" style={{ color: "var(--journal)" }}>
+              Support &amp; admin tasks.
+            </p>
 
-            <div className="space-y-3">
-              {/* Existing shallow tasks */}
-              {wizard.shallowTasks.length > 0 && (
-                <div className="space-y-2">
-                  {wizard.shallowTasks.map((t, i) => (
-                    <div
-                      key={i}
-                      className="flex items-center gap-3 bg-white border border-zinc-200 rounded-lg px-4 py-2.5"
-                    >
-                      <span className="flex-1 text-sm text-zinc-900">{t.title}</span>
-                      <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-zinc-100 text-zinc-600">
-                        {formatMinutes(t.minutes)}
-                      </span>
-                      <button
-                        onClick={() => removeShallowTask(i)}
-                        className="text-zinc-300 hover:text-red-500 transition-colors"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Quick add */}
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={shallowInput}
-                  onChange={(e) => setShallowInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      addShallowTask();
-                    }
-                  }}
-                  placeholder="Adicionar tarefa..."
-                  className="flex-1 border-2 border-zinc-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-emerald-500 transition-colors"
-                />
-                <button
-                  onClick={addShallowTask}
-                  disabled={!shallowInput.trim()}
-                  className="px-4 py-2.5 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                >
-                  +
-                </button>
-              </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                {[15, 30, 45, 60].map((m) => (
-                  <button
-                    key={m}
-                    onClick={() => setShallowMinutes(m)}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
-                      shallowMinutes === m
-                        ? "bg-zinc-700 text-white"
-                        : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
-                    }`}
+            {wizard.shallowTasks.length > 0 && (
+              <div>
+                {wizard.shallowTasks.map((t, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center gap-3 border-b border-tempo-border py-3"
                   >
-                    {formatMinutes(m)}
-                  </button>
+                    <span className="flex-1 font-body text-base text-tempo-text">{t.title}</span>
+                    <span className="font-ui text-[13px] text-tempo-muted tabular-nums">
+                      {formatMinutes(t.minutes)}
+                    </span>
+                    <button
+                      onClick={() => removeShallowTask(i)}
+                      className="text-tempo-muted hover:text-tempo-accent transition-colors"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
                 ))}
               </div>
+            )}
 
-              {wizard.shallowTasks.length === 0 && (
-                <p className="text-center text-sm text-zinc-400 py-6">
-                  Nenhuma tarefa shallow adicionada ainda.
-                  <br />
-                  Voce pode pular se nao tiver nenhuma agora.
-                </p>
-              )}
+            <div className="flex items-center gap-2 mt-3">
+              <input
+                type="text"
+                value={shallowInput}
+                onChange={(e) => setShallowInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addShallowTask();
+                  }
+                }}
+                placeholder="Add task..."
+                className="flex-1 font-body text-base border-b border-tempo-border bg-transparent px-0 py-2 text-tempo-text placeholder:text-tempo-muted focus:border-tempo-accent transition-colors"
+              />
+              <button
+                onClick={addShallowTask}
+                disabled={!shallowInput.trim()}
+                className="font-ui text-[13px] font-medium bg-tempo-text text-tempo-bg px-5 py-2 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+                style={{ letterSpacing: "0.04em" }}
+              >
+                Add
+              </button>
             </div>
+            <div className="flex items-center gap-2 flex-wrap mt-3">
+              {[15, 30, 45, 60].map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setShallowMinutes(m)}
+                  className={`font-ui text-[13px] font-medium px-4 py-2 transition-colors ${
+                    shallowMinutes === m
+                      ? "bg-tempo-text text-tempo-bg"
+                      : "border border-tempo-border text-tempo-muted hover:border-tempo-text hover:text-tempo-text"
+                  }`}
+                  style={{ letterSpacing: "0.04em" }}
+                >
+                  {formatMinutes(m)}
+                </button>
+              ))}
+            </div>
+
+            {wizard.shallowTasks.length === 0 && (
+              <p className="font-body text-base text-tempo-muted py-8 text-center">
+                No shallow tasks yet. You can skip if you don&apos;t have any.
+              </p>
+            )}
           </div>
         )}
 
-        {/* ===== STEP 5: Review do Plano ===== */}
+        {/* ===== STEP 5: Review ===== */}
         {step === 5 && (
-          <div className="space-y-8">
-            <div className="text-center">
-              <h2 className="text-3xl font-bold text-zinc-900 mb-2">
-                Review do Plano
-              </h2>
-              <p className="text-zinc-500">
-                {wizard.focusWord
-                  ? `Foco: "${wizard.focusWord}" | Energia: ${ENERGY_OPTIONS.find((e) => e.value === wizard.energy)?.emoji ?? ""}`
-                  : "Confira seu plano antes de comecar"}
-              </p>
-            </div>
+          <div>
+            <h2 className="font-display text-tempo-text mb-2" style={{ fontSize: "24px" }}>Review</h2>
+            <p className="font-body text-[15px] mb-7" style={{ color: "var(--journal)" }}>
+              {wizard.focusWord
+                ? `Focus: "${wizard.focusWord}" · Energy: ${wizard.energy}/5`
+                : "Review your plan before starting"}
+            </p>
 
-            {/* Overcommitment bar */}
-            <div className="rounded-xl border border-zinc-200 bg-white p-5 space-y-3">
-              <div className="flex items-center justify-between text-sm">
-                <span className="font-medium text-zinc-700">
+            {/* Capacity bar — matches dashboard 6px style */}
+            <div className="mb-10">
+              <div className="flex items-baseline justify-between mb-2">
+                <span className="font-ui text-[11px] font-medium uppercase text-tempo-muted" style={{ letterSpacing: "0.12em" }}>
+                  Time Allocation
+                </span>
+                <span className="font-ui text-xs text-tempo-muted">
                   {formatMinutes(previewCommitted)} / {formatMinutes(previewAvailable)}
                 </span>
-                <span
-                  className={`font-medium ${
-                    previewStatus === "green"
-                      ? "text-emerald-600"
-                      : previewStatus === "yellow"
-                        ? "text-amber-600"
-                        : "text-red-600"
-                  }`}
-                >
-                  {previewRemaining >= 0
-                    ? `${formatMinutes(previewRemaining)} restante`
-                    : `${formatMinutes(Math.abs(previewRemaining))} excedido`}
-                </span>
               </div>
-              <div className="w-full h-3 bg-zinc-100 rounded-full overflow-hidden">
+              <div className="relative w-full" style={{ height: "6px", background: "var(--border)" }}>
                 <div
-                  className={`h-full rounded-full transition-all duration-500 ${
-                    previewStatus === "green"
-                      ? "bg-emerald-500"
-                      : previewStatus === "yellow"
-                        ? "bg-amber-500"
-                        : "bg-red-500"
-                  }`}
-                  style={{ width: `${Math.min(barPercent, 100)}%` }}
+                  className="absolute left-0 top-0 h-full transition-all duration-500"
+                  style={{
+                    width: `${Math.min(barPercent, 100)}%`,
+                    background: previewStatus === "red" ? "var(--accent)" : "var(--text)",
+                    opacity: previewStatus === "red" ? 1 : 0.25,
+                  }}
                 />
+                <div
+                  className="absolute bg-tempo-text"
+                  style={{ left: "100%", top: "-6px", width: "1.5px", height: "18px" }}
+                />
+              </div>
+              <div className="flex justify-between mt-2">
+                <span className={`font-ui text-xs ${
+                  previewStatus === "red" ? "text-tempo-accent" : "text-tempo-muted"
+                }`}>
+                  {previewRemaining >= 0
+                    ? `${formatMinutes(previewRemaining)} remaining`
+                    : `${formatMinutes(Math.abs(previewRemaining))} over`}
+                </span>
               </div>
 
               {/* Summary stats */}
-              <div className="grid grid-cols-3 gap-4 pt-2 text-center">
+              <div className="grid grid-cols-3 gap-8 mt-6 pt-6 border-t border-tempo-border">
                 <div>
-                  <div className="text-lg font-bold text-indigo-600">{formatMinutes(totalDeep)}</div>
-                  <div className="text-xs text-zinc-400">Deep work</div>
+                  <p className="font-display text-tempo-text" style={{ fontSize: "28px", lineHeight: "1.1" }}>
+                    {formatMinutes(totalDeep)}
+                  </p>
+                  <p className="font-ui text-[11px] text-tempo-muted uppercase mt-0.5" style={{ letterSpacing: "0.1em" }}>
+                    Deep work
+                  </p>
                 </div>
                 <div>
-                  <div className="text-lg font-bold text-zinc-600">{formatMinutes(totalShallow)}</div>
-                  <div className="text-xs text-zinc-400">Shallow</div>
+                  <p className="font-display text-tempo-text" style={{ fontSize: "28px", lineHeight: "1.1" }}>
+                    {formatMinutes(totalShallow)}
+                  </p>
+                  <p className="font-ui text-[11px] text-tempo-muted uppercase mt-0.5" style={{ letterSpacing: "0.1em" }}>
+                    Shallow
+                  </p>
                 </div>
                 <div>
-                  <div className="text-lg font-bold text-zinc-900">{allTasks.length}</div>
-                  <div className="text-xs text-zinc-400">Tasks</div>
+                  <p className="font-display text-tempo-text" style={{ fontSize: "28px", lineHeight: "1.1" }}>
+                    {allTasks.length}
+                  </p>
+                  <p className="font-ui text-[11px] text-tempo-muted uppercase mt-0.5" style={{ letterSpacing: "0.1em" }}>
+                    Tasks
+                  </p>
                 </div>
               </div>
             </div>
 
             {/* Overcommitment warning */}
             {previewStatus === "red" && (
-              <div className="rounded-xl border border-red-200 bg-red-50 p-4">
-                <p className="text-sm font-medium text-red-800">
-                  {"\u{26A0}\u{FE0F}"} Voce esta sobrecarregado! Considere cortar ou mover algumas tasks para outro dia.
-                </p>
-              </div>
+              <p className="font-body text-base text-tempo-accent border-l-2 border-tempo-accent pl-4 mb-8">
+                You&apos;re overcommitted. Consider cutting or moving tasks.
+              </p>
             )}
 
             {/* Task list grouped */}
-            <div className="space-y-4">
-              {/* Frog */}
+            <div className="space-y-8 mb-10">
               {allTasks.filter((t) => t.is_frog).length > 0 && (
                 <div>
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2">
-                    {"\u{1F438}"} Eat the Frog
+                  <h3
+                    className="font-ui font-semibold uppercase text-tempo-accent mb-3"
+                    style={{ fontSize: "9px", letterSpacing: "0.14em" }}
+                  >
+                    Frog
                   </h3>
                   {allTasks
                     .filter((t) => t.is_frog)
@@ -1197,10 +1093,12 @@ export default function DailyEntryPage() {
                 </div>
               )}
 
-              {/* Deep work */}
               {allTasks.filter((t) => !t.is_frog && t.type === "deep").length > 0 && (
                 <div>
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2">
+                  <h3
+                    className="font-ui font-semibold uppercase text-tempo-muted mb-3"
+                    style={{ fontSize: "9px", letterSpacing: "0.14em" }}
+                  >
                     Deep Work
                   </h3>
                   {allTasks
@@ -1211,10 +1109,12 @@ export default function DailyEntryPage() {
                 </div>
               )}
 
-              {/* Shallow work */}
               {allTasks.filter((t) => t.type === "shallow").length > 0 && (
                 <div>
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2">
+                  <h3
+                    className="font-ui font-semibold uppercase text-tempo-muted mb-3"
+                    style={{ fontSize: "9px", letterSpacing: "0.14em" }}
+                  >
                     Shallow Work
                   </h3>
                   {allTasks
@@ -1226,36 +1126,34 @@ export default function DailyEntryPage() {
               )}
 
               {allTasks.length === 0 && (
-                <p className="text-center text-sm text-zinc-400 py-4">
-                  Nenhuma tarefa adicionada. Volte e adicione pelo menos uma!
+                <p className="font-body text-base text-tempo-muted text-center py-6">
+                  No tasks added. Go back and add at least one.
                 </p>
               )}
             </div>
 
-            {/* Coach section */}
-            <div className="rounded-xl border border-zinc-200 bg-white p-5 space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-zinc-100 flex items-center justify-center text-lg">
-                  {"\u{1F916}"}
-                </div>
-                <div>
-                  <p className="font-semibold text-zinc-900">Coach IA</p>
-                  <p className="text-xs text-zinc-500">Peca uma analise do seu plano</p>
-                </div>
-              </div>
+            {/* Coach */}
+            <div className="pt-8 border-t border-tempo-border">
+              <h3 className="font-display text-tempo-text mb-4" style={{ fontSize: "24px" }}>Coach</h3>
 
               {coachResponse && (
-                <div className="rounded-lg bg-zinc-50 border border-zinc-200 p-4 text-sm text-zinc-700 whitespace-pre-wrap">
-                  {coachResponse}
+                <div className="pl-6 border-l-2 border-tempo-border mb-4">
+                  <p className="font-accent text-[17px] text-tempo-muted mb-1">
+                    {new Date().toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}
+                  </p>
+                  <p className="font-body text-base italic leading-relaxed whitespace-pre-wrap" style={{ color: "var(--journal)" }}>
+                    {coachResponse}
+                  </p>
                 </div>
               )}
 
               <button
                 onClick={askCoach}
                 disabled={coachLoading || allTasks.length === 0}
-                className="w-full py-2.5 text-sm font-medium rounded-lg border-2 border-zinc-200 text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className="font-ui text-[13px] font-medium border border-tempo-text text-tempo-text px-6 py-2.5 hover:bg-tempo-text hover:text-tempo-bg disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                style={{ letterSpacing: "0.04em" }}
               >
-                {coachLoading ? "Pensando..." : coachResponse ? "Pedir novamente" : "Pedir conselho do Coach"}
+                {coachLoading ? "Thinking..." : coachResponse ? "Ask again" : "Ask Coach for advice"}
               </button>
             </div>
           </div>
@@ -1263,13 +1161,14 @@ export default function DailyEntryPage() {
       </div>
 
       {/* Navigation footer */}
-      <div className="sticky bottom-0 bg-[#fafafa] pt-4 pb-6 mt-8 flex items-center justify-between gap-4">
+      <div className="sticky bottom-0 bg-tempo-bg pt-6 pb-8 mt-10 flex items-center justify-between gap-4">
         {step > 1 ? (
           <button
             onClick={prev}
-            className="text-sm font-medium text-zinc-500 hover:text-zinc-700 transition-colors"
+            className="font-ui text-[13px] font-medium text-tempo-muted hover:text-tempo-text transition-colors px-4 py-2.5"
+            style={{ letterSpacing: "0.04em" }}
           >
-            {"\u{2190}"} Voltar
+            Back
           </button>
         ) : (
           <div />
@@ -1279,17 +1178,19 @@ export default function DailyEntryPage() {
           <button
             onClick={next}
             disabled={!canNext}
-            className="px-8 py-3 bg-emerald-600 text-white text-sm font-semibold rounded-xl hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm"
+            className="font-ui text-[13px] font-medium bg-tempo-text text-tempo-bg px-8 py-3 hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+            style={{ letterSpacing: "0.04em" }}
           >
-            Proximo {"\u{2192}"}
+            Continue
           </button>
         ) : (
           <button
             onClick={handleStart}
             disabled={saving || allTasks.length === 0}
-            className="px-8 py-3 bg-emerald-600 text-white text-sm font-semibold rounded-xl hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shadow-sm"
+            className="font-ui text-[13px] font-medium bg-tempo-text text-tempo-bg px-8 py-3 hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+            style={{ letterSpacing: "0.04em" }}
           >
-            {saving ? "Salvando..." : "Comecar o dia! \u{1F680}"}
+            {saving ? "Saving..." : "Start the day"}
           </button>
         )}
       </div>
@@ -1298,8 +1199,48 @@ export default function DailyEntryPage() {
 }
 
 // ---------------------------------------------------------------------------
-// Sub-component: Task preview row for Step 5
+// Sub-components
 // ---------------------------------------------------------------------------
+
+function HabitToggle({
+  label,
+  sublabel,
+  active,
+  onToggle,
+}: {
+  label: string;
+  sublabel: string;
+  active: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      onClick={onToggle}
+      className="w-full flex items-center justify-between py-4 border-b border-tempo-border text-left transition-colors"
+    >
+      <div className="flex flex-col gap-0.5">
+        <span className="font-body text-[17px] text-tempo-text">{label}</span>
+        <span className="font-ui text-xs text-tempo-muted">{sublabel}</span>
+      </div>
+      {/* Toggle switch — 44x24 pill */}
+      <div
+        className={`relative flex-shrink-0 rounded-full transition-colors ${
+          active ? "bg-tempo-olive" : "bg-tempo-muted"
+        }`}
+        style={{ width: "44px", height: "24px" }}
+      >
+        <div
+          className="absolute top-[2px] bg-white rounded-full transition-transform"
+          style={{
+            width: "20px", height: "20px",
+            left: "2px",
+            transform: active ? "translateX(20px)" : "translateX(0)",
+          }}
+        />
+      </div>
+    </button>
+  );
+}
 
 function TaskPreviewRow({ task, projects }: { task: PendingTask; projects: Project[] }) {
   const projectName = task.project_id
@@ -1307,31 +1248,40 @@ function TaskPreviewRow({ task, projects }: { task: PendingTask; projects: Proje
     : null;
 
   return (
-    <div className="flex items-center gap-3 bg-white border border-zinc-100 rounded-lg px-4 py-2.5 mb-1.5">
-      {task.is_frog ? <span className="text-base">{"\u{1F438}"}</span> : null}
-      {task.source === "habit" ? (
-        <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">
-          habito
-        </span>
-      ) : null}
-      <span className="flex-1 text-sm text-zinc-900">{task.title}</span>
-      <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-zinc-100 text-zinc-600">
-        {formatMinutes(task.estimated_minutes)}
+    <div className={`flex items-start gap-3.5 py-3 border-b border-tempo-border ${
+      task.is_frog ? "border-l-[3px] border-l-tempo-accent pl-3.5 -ml-[3px]" : ""
+    }`}>
+      <div className="flex-1 min-w-0">
+        <p className="font-body text-base text-tempo-text">{task.title}</p>
+        <div className="flex items-center gap-2 mt-0.5">
+          {task.source === "habit" && (
+            <span
+              className="font-ui font-semibold uppercase bg-tempo-surface text-tempo-muted"
+              style={{ fontSize: "9px", letterSpacing: "0.14em", padding: "2px 7px" }}
+            >
+              Habit
+            </span>
+          )}
+          <span
+            className={`font-ui font-semibold uppercase ${
+              task.is_frog
+                ? "bg-tempo-accent-light text-tempo-accent"
+                : task.type === "deep"
+                  ? "bg-tempo-surface text-tempo-text border border-tempo-border"
+                  : "bg-tempo-surface text-tempo-muted"
+            }`}
+            style={{ fontSize: "9px", letterSpacing: "0.14em", padding: "2px 7px" }}
+          >
+            {task.is_frog ? "Frog" : task.type}
+          </span>
+          {projectName && (
+            <span className="font-ui text-xs text-tempo-muted">{projectName}</span>
+          )}
+        </div>
+      </div>
+      <span className="font-ui text-[13px] text-tempo-muted flex-shrink-0 mt-[3px] tabular-nums">
+        {task.estimated_minutes} min
       </span>
-      <span
-        className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-          task.type === "deep"
-            ? "bg-indigo-100 text-indigo-700"
-            : "bg-slate-100 text-slate-600"
-        }`}
-      >
-        {task.type}
-      </span>
-      {projectName && (
-        <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">
-          {projectName}
-        </span>
-      )}
     </div>
   );
 }
