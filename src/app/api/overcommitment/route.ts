@@ -22,21 +22,40 @@ export async function GET(request: NextRequest) {
       return row?.value ?? fallback;
     };
 
-    const availableHoursMinutes = parseFloat(getSetting('available_hours', '8')) * 60;
-    const lunchBreak = parseInt(getSetting('lunch_break', String(LUNCH_BREAK)));
-    const commuteBuffer = parseInt(getSetting('commute_buffer', String(COMMUTE_BUFFER)));
-    const reactiveBuffer = parseInt(getSetting('reactive_buffer', String(REACTIVE_BUFFER)));
+    const parseNum = (val: string, fallback: number) => {
+      const n = parseFloat(val);
+      return isNaN(n) || val.trim() === '' ? fallback : n;
+    };
+
+    // Derive default available hours from work window
+    const workStartStr = getSetting('work_start', '08:00');
+    const workEndStr = getSetting('work_end', '18:00');
+    const [wsH, wsM] = workStartStr.split(':').map(Number);
+    const [weH, weM] = workEndStr.split(':').map(Number);
+    const workWindowHours = (weH * 60 + weM - wsH * 60 - wsM) / 60;
+    const defaultAvailableHours = workWindowHours > 0 ? workWindowHours : 8;
+
+    const availableHoursMinutes = parseNum(getSetting('available_hours', ''), defaultAvailableHours) * 60;
+    const lunchBreak = parseNum(getSetting('lunch_break', String(LUNCH_BREAK)), LUNCH_BREAK);
+    const commuteBuffer = parseNum(getSetting('commute_buffer', String(COMMUTE_BUFFER)), COMMUTE_BUFFER);
+    const reactiveBuffer = parseNum(getSetting('reactive_buffer', String(REACTIVE_BUFFER)), REACTIVE_BUFFER);
 
     // 2. Get calendar events for the date
     const events = db.prepare(
       'SELECT start_time, end_time, title FROM calendar_events WHERE date = ? AND all_day = 0'
     ).all(date) as { start_time: string; end_time: string; title: string }[];
 
+    // Clamp events to work-day boundaries so multi-day events don't blow up the count
+    const dayStart = new Date(`${date}T${workStartStr}:00`).getTime();
+    const dayEnd = new Date(`${date}T${workEndStr}:00`).getTime();
+
     let calendarMinutes = 0;
     for (const event of events) {
-      const start = new Date(event.start_time).getTime();
-      const end = new Date(event.end_time).getTime();
-      calendarMinutes += (end - start) / 60000;
+      const start = Math.max(new Date(event.start_time).getTime(), dayStart);
+      const end = Math.min(new Date(event.end_time).getTime(), dayEnd);
+      if (end > start) {
+        calendarMinutes += (end - start) / 60000;
+      }
     }
 
     // 3. Smart buffer: check if lunch is already in calendar
@@ -86,16 +105,16 @@ export async function GET(request: NextRequest) {
       (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
     );
 
-    const workStart = new Date(`${date}T${getSetting('work_start', '08:00')}:00`).getTime();
-    const workEnd = new Date(`${date}T${getSetting('work_end', '18:00')}:00`).getTime();
+    const workStart = dayStart;
+    const workEnd = dayEnd;
     const lunchStart = new Date(`${date}T12:00:00`).getTime();
     const lunchEnd = new Date(`${date}T13:00:00`).getTime();
 
-    // Inject lunch as a virtual event if not in calendar
+    // Inject lunch as a virtual event if not in calendar — clamp to work boundaries
     const allBlockers = [...sortedEvents.map(e => ({
-      start: new Date(e.start_time).getTime(),
-      end: new Date(e.end_time).getTime(),
-    }))];
+      start: Math.max(new Date(e.start_time).getTime(), workStart),
+      end: Math.min(new Date(e.end_time).getTime(), workEnd),
+    }))].filter(b => b.end > b.start);
 
     if (!lunchAlreadyInCalendar) {
       allBlockers.push({ start: lunchStart, end: lunchEnd });
