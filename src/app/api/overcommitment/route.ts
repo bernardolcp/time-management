@@ -49,9 +49,20 @@ export async function GET(request: NextRequest) {
     const dayStart = new Date(`${date}T${workStartStr}:00`).getTime();
     const dayEnd = new Date(`${date}T${workEndStr}:00`).getTime();
 
+    // For today: only count time from NOW forward (past hours are gone)
+    const now = Date.now();
+    const today = new Date().toISOString().split('T')[0];
+    const isToday = date === today;
+    const effectiveStart = isToday ? Math.max(now, dayStart) : dayStart;
+
+    // If we're past work_end, no time left
+    const effectiveAvailable = isToday
+      ? Math.max(0, (dayEnd - effectiveStart) / 60000)
+      : availableHoursMinutes;
+
     let calendarMinutes = 0;
     for (const event of events) {
-      const start = Math.max(new Date(event.start_time).getTime(), dayStart);
+      const start = Math.max(new Date(event.start_time).getTime(), effectiveStart);
       const end = Math.min(new Date(event.end_time).getTime(), dayEnd);
       if (end > start) {
         calendarMinutes += (end - start) / 60000;
@@ -66,15 +77,24 @@ export async function GET(request: NextRequest) {
         || (startHour >= 11 && startHour <= 13 && !title.includes('meeting'));
     });
 
-    // 4. Calculate total overhead
-    const transitionMinutes = events.length * TRANSITION_PER_EVENT;
-    const totalOverhead = (lunchAlreadyInCalendar ? 0 : lunchBreak)
-      + commuteBuffer
-      + reactiveBuffer
-      + transitionMinutes;
+    // 4. Calculate total overhead — skip past buffers if today
+    const futureEvents = events.filter(e => new Date(e.end_time).getTime() > effectiveStart);
+    const transitionMinutes = futureEvents.length * TRANSITION_PER_EVENT;
+
+    // Skip lunch buffer if it's already past lunch time
+    const lunchPast = isToday && now > new Date(`${date}T13:00:00`).getTime();
+    const lunchOverhead = (lunchAlreadyInCalendar || lunchPast) ? 0 : lunchBreak;
+
+    // Scale reactive buffer proportionally to remaining work time
+    const fullDayMinutes = (dayEnd - dayStart) / 60000;
+    const scaledReactive = isToday
+      ? Math.round(reactiveBuffer * (effectiveAvailable / fullDayMinutes))
+      : reactiveBuffer;
+
+    const totalOverhead = lunchOverhead + commuteBuffer + scaledReactive + transitionMinutes;
 
     // 5. Net available minutes
-    const grossAvailable = availableHoursMinutes - calendarMinutes;
+    const grossAvailable = effectiveAvailable - calendarMinutes;
     const netAvailable = grossAvailable - totalOverhead;
 
     // 6. Get incomplete tasks, sum estimated_minutes
@@ -105,7 +125,7 @@ export async function GET(request: NextRequest) {
       (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
     );
 
-    const workStart = dayStart;
+    const workStart = effectiveStart;
     const workEnd = dayEnd;
     const lunchStart = new Date(`${date}T12:00:00`).getTime();
     const lunchEnd = new Date(`${date}T13:00:00`).getTime();
@@ -143,12 +163,13 @@ export async function GET(request: NextRequest) {
       committed_minutes: taskMinutes,
       remaining_minutes: remainingMinutes,
       deep_blocks: deepBlocks,
+      is_today: isToday,
       breakdown: {
-        gross_hours: availableHoursMinutes,
+        gross_hours: effectiveAvailable,
         calendar_events: calendarMinutes,
-        lunch: lunchAlreadyInCalendar ? 0 : lunchBreak,
+        lunch: lunchOverhead,
         commute: commuteBuffer,
-        reactive_buffer: reactiveBuffer,
+        reactive_buffer: scaledReactive,
         transitions: transitionMinutes,
         net_available: netAvailable,
       },
