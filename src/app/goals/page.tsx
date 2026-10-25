@@ -62,14 +62,6 @@ function formatDate(d: Date): string {
   return d.toISOString().split("T")[0];
 }
 
-function getWeekDates(monday: Date): Date[] {
-  return Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(monday);
-    d.setDate(d.getDate() + i);
-    return d;
-  });
-}
-
 function getStreak(logs: BehaviorLog[]): number {
   let streak = 0;
   const today = formatDate(new Date());
@@ -117,7 +109,6 @@ export default function GoalsPage() {
 
   const currentQuarter = getCurrentQuarter();
   const monday = getMonday(new Date());
-  const weekDates = getWeekDates(monday);
 
   // ------- Fetchers -------
 

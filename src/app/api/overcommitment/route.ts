@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
+import { requireApiUser } from '@/lib/api-auth';
 
 // Smart buffer defaults (minutes)
 const LUNCH_BREAK = 60;          // 1h almoço (12:00-13:00)
@@ -8,6 +9,9 @@ const REACTIVE_BUFFER = 45;      // Buffer para responder msgs, imprevistos
 const TRANSITION_PER_EVENT = 5;  // 5min de transição entre cada evento
 
 export async function GET(request: NextRequest) {
+  const gate = await requireApiUser();
+  if (!gate.ok) return gate.response;
+
   try {
     const db = getDb();
     const date = request.nextUrl.searchParams.get('date');

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
-import { auth } from "@/lib/auth";
 import { getDb } from "@/lib/db";
+import { requireApiUser } from "@/lib/api-auth";
 
 // Get RFC3339 timezone offset string (e.g., "-08:00") for a given IANA timezone
 function getTzOffset(timezone: string, dateStr: string): string {
@@ -17,18 +17,18 @@ function getTzOffset(timezone: string, dateStr: string): string {
 }
 
 export async function POST(request: NextRequest) {
+  const gate = await requireApiUser();
+  if (!gate.ok) return gate.response;
+
+  const accessToken = (gate.session as { accessToken?: string }).accessToken;
+  if (!accessToken) {
+    return NextResponse.json(
+      { error: "Not authenticated" },
+      { status: 401 }
+    );
+  }
+
   try {
-    const session = await auth();
-
-    if (!session || !(session as any).accessToken) {
-      return NextResponse.json(
-        { error: "Not authenticated" },
-        { status: 401 }
-      );
-    }
-
-    const accessToken = (session as any).accessToken as string;
-
     const dateParam = request.nextUrl.searchParams.get("date");
     const date = dateParam || (() => {
       const d = new Date();

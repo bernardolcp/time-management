@@ -1,7 +1,11 @@
 import { getDb } from '@/lib/db';
 import { NextRequest, NextResponse } from 'next/server';
+import { requireApiUser } from '@/lib/api-auth';
 
 export async function GET() {
+  const gate = await requireApiUser();
+  if (!gate.ok) return gate.response;
+
   try {
     const db = getDb();
     const projects = db.prepare('SELECT * FROM projects WHERE active = 1 ORDER BY sort_order ASC').all();
@@ -12,6 +16,9 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const gate = await requireApiUser();
+  if (!gate.ok) return gate.response;
+
   try {
     const db = getDb();
     const body = await request.json();

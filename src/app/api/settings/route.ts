@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
+import { requireApiUser } from '@/lib/api-auth';
 
 export async function GET() {
+  const gate = await requireApiUser();
+  if (!gate.ok) return gate.response;
+
   try {
     const db = getDb();
     const rows = db.prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[];
@@ -16,6 +20,9 @@ export async function GET() {
 }
 
 export async function PUT(request: NextRequest) {
+  const gate = await requireApiUser();
+  if (!gate.ok) return gate.response;
+
   try {
     const db = getDb();
     const body = await request.json();

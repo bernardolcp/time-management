@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
+import { requireApiUser, enforceAnthropicRateLimit } from '@/lib/api-auth';
 
 interface CoachRequest {
   type: 'daily_plan_review' | 'accountability_check' | 'weekly_reflection';
@@ -37,12 +38,6 @@ function getCurrentQuarter(): number {
   if (month <= 5) return 2;
   if (month <= 8) return 3;
   return 4;
-}
-
-function getDayOfYear(): number {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), 0, 0);
-  return Math.floor((now.getTime() - start.getTime()) / 86400000);
 }
 
 function getQuarterDay(): { day: number; total: number } {
@@ -350,12 +345,18 @@ function buildWeeklyReflectionMessage(body: CoachRequest, _overcommitment: Retur
 }
 
 export async function POST(request: NextRequest) {
+  const gate = await requireApiUser();
+  if (!gate.ok) return gate.response;
+
   if (!process.env.ANTHROPIC_API_KEY) {
     return NextResponse.json(
       { error: 'Configure ANTHROPIC_API_KEY no .env.local para ativar o coach' },
       { status: 200 }
     );
   }
+
+  const limited = enforceAnthropicRateLimit(gate.userKey);
+  if (limited) return limited;
 
   try {
     const body: CoachRequest = await request.json();

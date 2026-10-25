@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
+import { requireApiUser, enforceAnthropicRateLimit } from '@/lib/api-auth';
 
 interface DailyReviewRow {
   id: number;
@@ -153,13 +154,21 @@ function generateAlgorithmicWeeklyReview(
 }
 
 export async function GET(request: NextRequest) {
+  const gate = await requireApiUser();
+  if (!gate.ok) return gate.response;
+
+  const weekStart = request.nextUrl.searchParams.get('week_start');
+  if (!weekStart) {
+    return NextResponse.json({ error: 'week_start query param is required' }, { status: 400 });
+  }
+
+  if (process.env.ANTHROPIC_API_KEY) {
+    const limited = enforceAnthropicRateLimit(gate.userKey);
+    if (limited) return limited;
+  }
+
   try {
     const db = getDb();
-    const weekStart = request.nextUrl.searchParams.get('week_start');
-
-    if (!weekStart) {
-      return NextResponse.json({ error: 'week_start query param is required' }, { status: 400 });
-    }
 
     const dates = getWeekDates(weekStart);
     const weekEnd = dates[6];

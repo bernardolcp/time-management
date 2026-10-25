@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
+import { requireApiUser, enforceAnthropicRateLimit } from '@/lib/api-auth';
 
 interface TaskRow {
   id: number;
@@ -141,14 +142,23 @@ function generateAlgorithmicReview(
 }
 
 export async function GET(request: NextRequest) {
+  const gate = await requireApiUser();
+  if (!gate.ok) return gate.response;
+
+  const date = request.nextUrl.searchParams.get('date');
+  const generate = request.nextUrl.searchParams.get('generate') === 'true';
+
+  if (!date) {
+    return NextResponse.json({ error: 'date query param is required' }, { status: 400 });
+  }
+
+  if (generate && process.env.ANTHROPIC_API_KEY) {
+    const limited = enforceAnthropicRateLimit(gate.userKey);
+    if (limited) return limited;
+  }
+
   try {
     const db = getDb();
-    const date = request.nextUrl.searchParams.get('date');
-    const generate = request.nextUrl.searchParams.get('generate') === 'true';
-
-    if (!date) {
-      return NextResponse.json({ error: 'date query param is required' }, { status: 400 });
-    }
 
     // Check if review already exists
     const existing = db.prepare('SELECT * FROM daily_reviews WHERE date = ?').get(date) as Record<string, unknown> | undefined;
