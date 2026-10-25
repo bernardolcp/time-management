@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
+import { requireApiUser } from '@/lib/api-auth';
 
 // --- Types ---
 
@@ -153,6 +154,9 @@ function addDays(dateStr: string, days: number): string {
 // --- Main handler ---
 
 export async function GET(request: NextRequest) {
+  const gate = await requireApiUser();
+  if (!gate.ok) return gate.response;
+
   try {
     const db = getDb();
     const date = request.nextUrl.searchParams.get('date');

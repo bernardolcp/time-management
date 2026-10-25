@@ -1,7 +1,11 @@
 import { getDb } from '@/lib/db';
 import { NextRequest, NextResponse } from 'next/server';
+import { requireApiUser } from '@/lib/api-auth';
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const gate = await requireApiUser();
+  if (!gate.ok) return gate.response;
+
   try {
     const { id } = await params;
     const db = getDb();
@@ -25,6 +29,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 }
 
 export async function DELETE(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const gate = await requireApiUser();
+  if (!gate.ok) return gate.response;
+
   try {
     const { id } = await params;
     const db = getDb();

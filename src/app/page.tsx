@@ -108,7 +108,7 @@ export default function Dashboard() {
   const [goals, setGoals] = useState<Goal[]>([]);
   const [dailyEntry, setDailyEntry] = useState<DailyEntry | null>(null);
   const [scores, setScores] = useState<ScoresData | null>(null);
-  const [scoresLoading, setScoresLoading] = useState(true);
+  const [, setScoresLoading] = useState(true);
   const [loading, setLoading] = useState(true);
 
   // Coach state
@@ -245,9 +245,6 @@ export default function Dashboard() {
   const deepTasks = tasks.filter((t) => !t.is_frog && t.type === "deep");
   const shallowTasks = tasks.filter((t) => !t.is_frog && t.type === "shallow");
   const groupedTasks = [...frogTasks, ...deepTasks, ...shallowTasks];
-
-  const completedCount = tasks.filter((t) => t.completed).length;
-  const totalCount = tasks.length;
 
   // --- Date parts ---
 

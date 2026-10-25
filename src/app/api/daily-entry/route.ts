@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
+import { requireApiUser } from '@/lib/api-auth';
 
 export async function GET(request: NextRequest) {
+  const gate = await requireApiUser();
+  if (!gate.ok) return gate.response;
+
   const date = request.nextUrl.searchParams.get('date');
 
   if (!date) {
@@ -31,6 +35,9 @@ function getCurrentQuarterKey(): string {
 }
 
 export async function POST(request: NextRequest) {
+  const gate = await requireApiUser();
+  if (!gate.ok) return gate.response;
+
   const body = await request.json();
   const { date, energy_level, focus_word, training, spiritual, family_day, content_creation } = body;
 

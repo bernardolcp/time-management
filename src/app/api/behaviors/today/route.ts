@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
+import { requireApiUser } from "@/lib/api-auth";
 
 function formatDate(d: Date): string {
   return d.toISOString().split("T")[0];
 }
 
 export async function GET() {
+  const gate = await requireApiUser();
+  if (!gate.ok) return gate.response;
+
   try {
     const db = getDb();
     const today = formatDate(new Date());
@@ -39,7 +43,7 @@ export async function GET() {
       logsByBehavior.get(log.behavior_id)!.set(log.date, log.done === 1);
     }
 
-    function calcStreak(behaviorId: number): number {
+    const calcStreak = (behaviorId: number): number => {
       const logs = logsByBehavior.get(behaviorId);
       if (!logs) return 0;
 
